@@ -1,6 +1,7 @@
 #include "core/features.h"
 
 #include <algorithm>
+#include <bitset>
 #include <cmath>
 #include <vector>
 
@@ -200,7 +201,7 @@ bool extractFeatures(const QString& path, Features& out)
 double hammingSimilarity(uint64_t a, uint64_t b)
 {
     const uint64_t x = a ^ b;
-    const int dist = __builtin_popcountll(x);
+    const int dist = std::bitset<64>(x).count();
     return 1.0 - double(dist) / 64.0;
 }
 
