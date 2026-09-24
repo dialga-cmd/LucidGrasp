@@ -97,12 +97,12 @@ jobs:
         $opencvBin = "$env:OpenCV_DIR\x64\vc16\bin"
         Copy-Item "$opencvBin\opencv_world*.dll" $dest\
 
-    - name: Package Release
+    - name: Compile Windows Installer
       shell: pwsh
       run: |
-        Compress-Archive -Path package\LucidGrasp -DestinationPath lucidgrasp-windows-x64.zip
+        & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
 
     - name: Upload Release Asset
       uses: softprops/action-gh-release@v2
       with:
-        files: lucidgrasp-windows-x64.zip
+        files: package/LucidGrasp_Setup_x64.exe
