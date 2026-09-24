@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=LucidGrasp
+Comment=Semantic and Pixel-Perfect Image Search Engine
+Exec=image_search
+Icon=lucidgrasp
+Terminal=false
+Type=Application
+Categories=Graphics;Utility;
+Keywords=image;search;matching;vision;
+StartupNotify=true

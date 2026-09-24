@@ -19,6 +19,7 @@
 #include <QStatusBar>
 #include <QUrl>
 #include <QVBoxLayout>
+#include <QSpinBox>
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
@@ -71,7 +72,16 @@ MainWindow::MainWindow(QWidget* parent)
 
     searchBtn_ = new QPushButton(QStringLiteral("Search"), queryGroup);
     searchBtn_->setDefault(true);
+    
+    auto* threshRow = new QHBoxLayout;
+    threshRow->addWidget(new QLabel(QStringLiteral("Threshold (%):")));
+    thresholdSpin_ = new QSpinBox(queryGroup);
+    thresholdSpin_->setRange(0, 100);
+    thresholdSpin_->setValue(50);
+    threshRow->addWidget(thresholdSpin_);
+    
     queryLayout->addWidget(searchBtn_);
+    queryLayout->addLayout(threshRow);
     left->addWidget(queryGroup);
 
     stats_ = new QLabel(central);
@@ -312,6 +322,8 @@ void MainWindow::startSearch()
                              Qt::SmoothTransformation));
 
         const int pct = int(r.score * 100.0 + 0.5);
+        if (pct < thresholdSpin_->value()) continue;
+        
         auto* item = new QListWidgetItem(
             icon,
             QStringLiteral("%1%2\n%3")

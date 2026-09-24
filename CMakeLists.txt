@@ -11,8 +11,8 @@ find_package(Threads REQUIRED)
 add_executable(image_search
     src/main.cpp
     src/selftest.cpp
-    src/core/clip_embedder.h
-    src/core/clip_embedder.cpp
+    src/core/cv_matcher.h
+    src/core/cv_matcher.cpp
     src/core/features.h
     src/core/features.cpp
     src/core/index.h
@@ -22,13 +22,12 @@ add_executable(image_search
 )
 
 target_include_directories(image_search PRIVATE src)
-set(ORT_ROOT "${CMAKE_SOURCE_DIR}/third_party/onnxruntime")
-if(EXISTS "${ORT_ROOT}/include/onnxruntime_cxx_api.h")
-  target_include_directories(image_search PRIVATE "${ORT_ROOT}/include")
-endif()
-find_library(ONNXRUNTIME_LIB onnxruntime PATHS "${ORT_ROOT}/lib" NO_DEFAULT_PATH)
-if(ONNXRUNTIME_LIB)
-  target_link_libraries(image_search PRIVATE "${ONNXRUNTIME_LIB}")
-endif()
+find_package(OpenCV REQUIRED)
+target_link_libraries(image_search PRIVATE ${OpenCV_LIBS})
 target_link_libraries(image_search PRIVATE Qt6::Widgets Threads::Threads)
 target_compile_options(image_search PRIVATE -Wall -Wextra)
+
+# Installation targets to make it a "real" Linux software
+install(TARGETS image_search DESTINATION bin)
+install(FILES lucidgrasp.desktop DESTINATION share/applications)
+install(FILES lucidgrasp.png DESTINATION share/icons/hicolor/256x256/apps RENAME lucidgrasp.png)

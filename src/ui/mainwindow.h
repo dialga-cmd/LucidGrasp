@@ -13,6 +13,7 @@ class QListWidget;
 class QListWidgetItem;
 class QPushButton;
 class QProgressBar;
+class QSpinBox;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -46,6 +47,7 @@ private:
     QLabel* preview_ = nullptr;
     QLabel* stats_ = nullptr;
     QListWidget* results_ = nullptr;
+    QSpinBox* thresholdSpin_ = nullptr;
 
     core::ImageIndex index_;
     std::thread worker_;

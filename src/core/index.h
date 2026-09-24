@@ -7,14 +7,13 @@
 
 #include <QString>
 
-#include "core/clip_embedder.h"
+#include "core/cv_matcher.h"
 
 namespace core {
 
 struct IndexEntry {
   QString relPath;
   Features features;
-  std::vector<float> clip;
 };
 
 struct SearchResult {
@@ -50,11 +49,6 @@ public:
   bool empty() const { return entries_.empty(); }
   size_t size() const { return entries_.size(); }
   void clear();
-
-  void setClipEmbedder(ClipEmbedder *c) { clip_ = c; }
-
-private:
-  ClipEmbedder *clip_ = nullptr;
 
 private:
   QString root_;

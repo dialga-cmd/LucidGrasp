@@ -33,3 +33,4 @@ models/
 *.pt
 *.bin
 *.fix*
+*cache

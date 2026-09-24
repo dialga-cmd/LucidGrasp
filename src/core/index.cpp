@@ -159,37 +159,23 @@ std::vector<SearchResult> ImageIndex::search(const Features &query,
 
   results.reserve(entries_.size());
   const QDir root(root_);
+  
+  CvMatcher cvMatcher;
+
   for (const IndexEntry &e : entries_) {
     SearchResult r;
     r.relPath = e.relPath;
     r.absPath = root.absoluteFilePath(e.relPath);
+    
+    // Perform detailed OpenCV pixel matching
+    QImage dbImg(r.absPath);
+    double cvScore = cvMatcher.match(queryImage, dbImg);
+    
+    // Combine feature score and OpenCV pixel score
+    double baseScore = combineScore(query, e.features);
+    r.score = 0.8 * cvScore + 0.2 * baseScore;
+    
     r.exact = isExactMatch(query, e.features);
-    const bool useClip = clip_ && clip_->loaded();
-    std::vector<float> qEmbed;
-    const bool haveQ =
-        useClip && queryImage.width() > 0 && clip_->embed(queryImage, qEmbed);
-    const QDir root(root_);
-
-
-    std::vector<SearchResult> results;
-    results.reserve(entries_.size());
-    const QDir rootd(root_);
-    for (const IndexEntry &e : entries_) {
-      SearchResult r;
-      r.relPath = e.relPath;
-      r.absPath = rootd.absoluteFilePath(e.relPath);
-      r.score = combineScore(query, e.features);
-      if (haveQ) {
-        QImage img(r.absPath);
-        std::vector<float> eEmbed;
-        if (!img.isNull() && clip_->embed(img, eEmbed)) {
-          const double cos = cosineSimilarity(qEmbed, eEmbed);
-          r.score = 0.8 * cos + 0.2 * r.score; // CLIP dominates
-        }
-      }
-      r.exact = isExactMatch(query, e.features);
-      results.push_back(std::move(r));
-    }
     results.push_back(std::move(r));
   }
 

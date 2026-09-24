@@ -1,0 +1,37 @@
+name: Build and Release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake qt6-base-dev libopencv-dev g++
+        
+    - name: Build Project
+      run: |
+        mkdir build
+        cd build
+        cmake ..
+        make -j$(nproc)
+        
+    - name: Package Release
+      run: |
+        cd build
+        tar -czvf lucidgrasp-linux-x64.tar.gz image_search ../lucidgrasp.png ../lucidgrasp.desktop
+        
+    - name: Upload Release Asset
+      uses: softprops/action-gh-release@v1
+      with:
+        files: build/lucidgrasp-linux-x64.tar.gz
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
