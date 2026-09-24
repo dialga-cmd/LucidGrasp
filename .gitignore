@@ -1,0 +1,35 @@
+# Build directories and files
+build/
+compile_commands.json
+CMakeUserPresets.json
+CMakeCache.txt
+CMakeFiles/
+Makefile
+*.cmake
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+
+# IDE and Editor folders
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Application data
+.image_search_index.bin
+
+# Third-party libraries (downloaded/extracted)
+third_party/
+
+# Machine Learning models (large files)
+models/
+*.onnx
+*.pt
+*.bin
+*.fix*
