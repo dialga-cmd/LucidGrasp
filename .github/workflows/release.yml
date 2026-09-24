@@ -30,7 +30,7 @@ jobs:
     - name: Package Release
       run: |
         mkdir -p package/LucidGrasp
-        cp build/image_search package/LucidGrasp/
+        cp build/LucidGrasp package/LucidGrasp/
         cp lucidgrasp.png package/LucidGrasp/
         cp lucidgrasp.desktop package/LucidGrasp/
         cp README.md package/LucidGrasp/
@@ -85,13 +85,13 @@ jobs:
       run: |
         $dest = "package\LucidGrasp"
         New-Item -ItemType Directory -Path $dest -Force
-        Copy-Item build\image_search.exe $dest\
+        Copy-Item build\LucidGrasp.exe $dest\
         Copy-Item lucidgrasp.png $dest\
         Copy-Item README.md $dest\
         Copy-Item LICENSE $dest\
 
         # Run windeployqt to bundle all Qt DLLs, plugins, and platform files
-        windeployqt --release --no-translations --no-system-d3d-compiler --no-opengl-sw $dest\image_search.exe
+        windeployqt --release --no-translations --no-system-d3d-compiler --no-opengl-sw $dest\LucidGrasp.exe
 
         # Copy the OpenCV world DLL
         $opencvBin = "$env:OpenCV_DIR\x64\vc16\bin"

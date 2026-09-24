@@ -1,7 +1,7 @@
 [Desktop Entry]
 Name=LucidGrasp
 Comment=Semantic and Pixel-Perfect Image Search Engine
-Exec=image_search
+Exec=LucidGrasp
 Icon=lucidgrasp
 Terminal=false
 Type=Application
