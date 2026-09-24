@@ -69,6 +69,8 @@ jobs:
 
     - name: Setup MSVC
       uses: ilammy/msvc-dev-cmd@v1
+      with:
+        toolset: '14.29'
 
     - name: Build Project
       shell: pwsh
