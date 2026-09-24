@@ -2,17 +2,35 @@
 
 This document covers the internal workings of LucidGrasp, the decisions made during development, and the current state of the software. It is written for contributors and for future reference when expanding the codebase.
 
+## Development Process
+
+This project was developed with the assistance of Google Antigravity (an AI coding assistant). The developer described what the software should do, identified problems during testing, proposed algorithm ideas, and made design decisions. The AI assistant wrote the implementation code, debugged build failures, restructured the matching engine across multiple iterations, set up the build system and packaging, and documented everything. Every major architectural decision in this document was made by the developer based on real test results, and the AI translated those decisions into working code.
+
 ## Project History
 
 LucidGrasp started as a local image similarity search tool. The original implementation used perceptual hashing (pHash), difference hashing (dHash), and color histogram intersection to compare images. These algorithms work by shrinking images down, extracting frequency domain information through a Discrete Cosine Transform, and comparing the resulting binary fingerprints using Hamming distance.
 
-An attempt was made to integrate CLIP (Contrastive Language Image Pretraining) through ONNX Runtime for semantic image understanding. The idea was that a neural network could understand what an image "means" rather than just what it looks like at the pixel level. This approach was abandoned because the model consistently produced unreliable similarity scores. A photograph of an abandoned building and a portrait of a person were being scored as 86% similar, which is completely unacceptable for a tool that needs to produce trustworthy results. The ONNX Runtime dependency and all CLIP related code were removed entirely from the codebase.
+### CLIP Attempt and Failure
 
-The first OpenCV replacement used only ORB keypoint matching and color histogram intersection with a 40/60 weight split. Testing revealed a critical flaw: color grading completely destroyed the similarity score. When a raw photograph of an abandoned building was compared against its color graded edit (a teal/cyan tint applied to the same image), the algorithm failed to recognize them as the same image. The color histogram saw entirely different color distributions and tanked the score, even though the structural content was pixel for pixel identical. The same problem appeared with portrait photography: a raw image and its shadow crushed edit were scored at only 50% similarity.
+An attempt was made to integrate CLIP (Contrastive Language Image Pretraining) through ONNX Runtime for semantic image understanding. The idea was that a neural network could understand what an image "means" rather than just what it looks like at the pixel level. The AI assistant set up the ONNX Runtime integration, downloaded the CLIP model, and wired it into the search pipeline. Testing revealed that the model consistently produced unreliable similarity scores. A photograph of an abandoned building and a portrait of a person were being scored as 86% similar, which is completely unacceptable for a tool that needs to produce trustworthy results. The developer identified this as a fundamental problem with semantic matching for this use case. The ONNX Runtime dependency and all CLIP related code were removed entirely from the codebase.
+
+### First OpenCV Attempt
+
+The developer proposed a new approach: break the image down at the pixel level, extract color information, shadows, and every minor detail, then compare those raw properties between two images. The AI assistant implemented this using OpenCV with ORB keypoint matching and color histogram intersection with a 40/60 weight split.
+
+Testing revealed a critical flaw: color grading completely destroyed the similarity score. The developer tested with real photographs: a raw image of an abandoned building compared against its color graded edit (a teal/cyan tint applied to the same image). The algorithm failed to recognize them as the same image. The color histogram saw entirely different color distributions and tanked the score, even though the structural content was pixel for pixel identical. The same problem appeared with portrait photography: a raw image and its shadow crushed edit were scored at only 50% similarity.
 
 The root cause was that the color histogram carried 60% of the total weight. Any edit that shifted colors (tinting, grading, contrast adjustment, filter application) would obliterate the histogram overlap and drag the final score down regardless of how structurally identical the images were.
 
-This was fixed by introducing SSIM (Structural Similarity Index) as the dominant comparison signal and rebalancing all three weights.
+### Final Solution
+
+The AI assistant fixed this by introducing SSIM (Structural Similarity Index) as the dominant comparison signal and rebalancing all three algorithm weights. SSIM compares images in grayscale, making it completely blind to color changes. The new weight split was set to 45% SSIM, 35% ORB, and 20% color histogram. This means 80% of the final score comes from color invariant signals. The developer confirmed this solution worked correctly: edited images were now properly recognized as matches regardless of what color grading had been applied.
+
+### Packaging and Distribution
+
+The developer wanted LucidGrasp to feel like a real installed application, not just a compiled binary. The AI assistant generated an application icon (the LG logo with overlapping squares), created a Linux .desktop file for the application drawer, added CMake install targets, and set up a GitHub Actions workflow for automated release builds. The icon initially failed to appear in the app drawer because it was in JPEG format and the GTK icon cache requires PNG. The AI converted it and added the icon cache refresh command to the install instructions.
+
+The developer then requested Windows support. The AI assistant rewrote the GitHub Actions workflow to include a separate Windows build job that compiles the project with MSVC, bundles all Qt6 and OpenCV DLLs using windeployqt, and packages everything into a self contained zip file. The CMakeLists.txt was updated to handle both platforms: embedding the icon via a Windows resource file on MSVC, and using platform appropriate compiler flags.
 
 ## Current Architecture
 
@@ -22,9 +40,11 @@ The project uses CMake (minimum version 3.16) with C++17. Three external librari
 
     Qt6 Widgets for the graphical interface
     OpenCV for computer vision and pixel analysis
-    pthreads for background indexing
+    pthreads for background indexing (Linux only, Windows uses native threads)
 
-OpenCV is installed globally on the system via the package manager (sudo apt install libopencv-dev) and CMake locates it automatically through find_package(OpenCV REQUIRED). This means no hardcoded paths exist anywhere in the project. Any user on any Linux machine can clone the repository and build it as long as they have the dependencies installed.
+On Linux, OpenCV is installed globally on the system via the package manager (sudo apt install libopencv-dev) and CMake locates it automatically through find_package(OpenCV REQUIRED). On Windows, the OpenCV path is passed explicitly to CMake using -DOpenCV_DIR. No hardcoded paths exist in the project itself.
+
+The CMakeLists.txt includes platform specific sections. On Windows, it appends a .rc resource file to embed the application icon into the executable and uses MSVC compatible compiler flags (/W3). On Linux, it uses GCC flags (-Wall -Wextra) and includes install targets for the binary, desktop file, and icon.
 
 ### Source Layout
 
@@ -73,6 +93,18 @@ The user interface includes a spinbox labeled "Threshold (%)" that defaults to 5
 The indexing process scans a directory recursively for all supported image formats (png, jpg, jpeg, bmp, gif, and any additional formats supported by the Qt image reader plugins installed on the system). For each image found, it extracts the feature set (file hash, pHash, dHash, color histogram) and stores the results in memory. Once complete, the index is serialized to a binary file named .image_search_index.bin in the root of the scanned directory. On subsequent launches, the application can load this cached index instantly without rescanning.
 
 Indexing runs on a background thread and reports progress back to the UI through Qt's queued connection mechanism. The user can cancel the indexing at any time.
+
+## Release Pipeline
+
+The project uses GitHub Actions to automatically build and package releases for both Linux and Windows whenever a new release is published on GitHub.
+
+### Linux Build
+
+The Linux job runs on ubuntu-latest. It installs Qt6, OpenCV, and g++ through apt, builds the project with make, and packages the executable along with the icon, desktop file, README, and license into a tar.gz archive named lucidgrasp-linux-x64.tar.gz. Users still need Qt6 and OpenCV installed on their system to run the binary because Linux builds dynamically link against system libraries.
+
+### Windows Build
+
+The Windows job runs on windows-latest. It installs Qt6 using the jurplel/install-qt-action GitHub Action, downloads the official OpenCV pre built Windows binaries, sets up MSVC through ilammy/msvc-dev-cmd, and builds the project with NMake. After compilation, it runs windeployqt to automatically copy all required Qt DLLs, plugins, and platform files into the output directory, and then copies the OpenCV world DLL alongside the executable. The entire folder is compressed into a zip file named lucidgrasp-windows-x64.zip. Windows users can extract this archive anywhere and run image_search.exe immediately with zero additional setup.
 
 ## Testing Results
 

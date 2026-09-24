@@ -8,7 +8,7 @@ set(CMAKE_AUTOMOC ON)
 find_package(Qt6 REQUIRED COMPONENTS Widgets)
 find_package(Threads REQUIRED)
 
-add_executable(image_search
+set(SOURCES
     src/main.cpp
     src/selftest.cpp
     src/core/cv_matcher.h
@@ -21,13 +21,27 @@ add_executable(image_search
     src/ui/mainwindow.cpp
 )
 
+# On Windows, embed the application icon into the executable
+if(WIN32)
+    list(APPEND SOURCES lucidgrasp.rc)
+endif()
+
+add_executable(image_search ${SOURCES})
+
 target_include_directories(image_search PRIVATE src)
 find_package(OpenCV REQUIRED)
 target_link_libraries(image_search PRIVATE ${OpenCV_LIBS})
 target_link_libraries(image_search PRIVATE Qt6::Widgets Threads::Threads)
-target_compile_options(image_search PRIVATE -Wall -Wextra)
 
-# Installation targets to make it a "real" Linux software
-install(TARGETS image_search DESTINATION bin)
-install(FILES lucidgrasp.desktop DESTINATION share/applications)
-install(FILES lucidgrasp.png DESTINATION share/icons/hicolor/256x256/apps RENAME lucidgrasp.png)
+if(MSVC)
+    target_compile_options(image_search PRIVATE /W3)
+else()
+    target_compile_options(image_search PRIVATE -Wall -Wextra)
+endif()
+
+# Linux system installation
+if(UNIX AND NOT APPLE)
+    install(TARGETS image_search DESTINATION bin)
+    install(FILES lucidgrasp.desktop DESTINATION share/applications)
+    install(FILES lucidgrasp.png DESTINATION share/icons/hicolor/256x256/apps RENAME lucidgrasp.png)
+endif()

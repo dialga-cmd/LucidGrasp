@@ -8,33 +8,100 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  build-linux:
     runs-on: ubuntu-latest
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-      
+
     - name: Install dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y cmake qt6-base-dev libopencv-dev g++
-        
+
     - name: Build Project
       run: |
         mkdir build
         cd build
         cmake ..
         make -j$(nproc)
-        
+
     - name: Package Release
       run: |
-        cd build
-        tar -czvf lucidgrasp-linux-x64.tar.gz image_search ../lucidgrasp.png ../lucidgrasp.desktop
-        
+        mkdir -p package/LucidGrasp
+        cp build/image_search package/LucidGrasp/
+        cp lucidgrasp.png package/LucidGrasp/
+        cp lucidgrasp.desktop package/LucidGrasp/
+        cp README.md package/LucidGrasp/
+        cp LICENSE package/LucidGrasp/
+        cd package
+        tar -czvf lucidgrasp-linux-x64.tar.gz LucidGrasp/
+
     - name: Upload Release Asset
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       with:
-        files: build/lucidgrasp-linux-x64.tar.gz
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        files: package/lucidgrasp-linux-x64.tar.gz
+
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Qt6
+      uses: jurplel/install-qt-action@v4
+      with:
+        version: '6.7.*'
+        host: 'windows'
+        target: 'desktop'
+        arch: 'win64_msvc2022_64'
+        modules: 'qtimageformats'
+
+    - name: Install OpenCV
+      shell: pwsh
+      run: |
+        $opencvVersion = "4.10.0"
+        $url = "https://github.com/opencv/opencv/releases/download/$opencvVersion/opencv-$opencvVersion-windows.exe"
+        Invoke-WebRequest -Uri $url -OutFile opencv-installer.exe
+        Start-Process -FilePath .\opencv-installer.exe -ArgumentList "-o`"C:\opencv`" -y" -Wait
+        echo "OpenCV_DIR=C:\opencv\opencv\build" >> $env:GITHUB_ENV
+
+    - name: Setup MSVC
+      uses: ilammy/msvc-dev-cmd@v1
+
+    - name: Build Project
+      shell: pwsh
+      run: |
+        mkdir build
+        cd build
+        cmake .. -G "NMake Makefiles" -DCMAKE_BUILD_TYPE=Release -DOpenCV_DIR="$env:OpenCV_DIR"
+        nmake
+
+    - name: Bundle Dependencies
+      shell: pwsh
+      run: |
+        $dest = "package\LucidGrasp"
+        New-Item -ItemType Directory -Path $dest -Force
+        Copy-Item build\image_search.exe $dest\
+        Copy-Item lucidgrasp.png $dest\
+        Copy-Item README.md $dest\
+        Copy-Item LICENSE $dest\
+
+        # Run windeployqt to bundle all Qt DLLs, plugins, and platform files
+        windeployqt --release --no-translations --no-system-d3d-compiler --no-opengl-sw $dest\image_search.exe
+
+        # Copy the OpenCV world DLL
+        $opencvBin = "$env:OpenCV_DIR\x64\vc16\bin"
+        Copy-Item "$opencvBin\opencv_world*.dll" $dest\
+
+    - name: Package Release
+      shell: pwsh
+      run: |
+        Compress-Archive -Path package\LucidGrasp -DestinationPath lucidgrasp-windows-x64.zip
+
+    - name: Upload Release Asset
+      uses: softprops/action-gh-release@v2
+      with:
+        files: lucidgrasp-windows-x64.zip
