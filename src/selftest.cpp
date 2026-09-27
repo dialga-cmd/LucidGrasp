@@ -106,7 +106,7 @@ int runSelfTest()
 {
     int failures = 0;
     const QString base =
-        QDir::tempPath() + QStringLiteral("/image_search_selftest");
+        QDir::tempPath() + QStringLiteral("/lucidgrasp_selftest");
     QDir(base).removeRecursively();
     const QString lib = base + QStringLiteral("/library");
     const QString qdir = base + QStringLiteral("/query");
@@ -143,7 +143,7 @@ int runSelfTest()
     QFile::copy(original, qExact);
 
     std::vector<core::SearchResult> r1;
-    if (!index.searchFile(qExact, 20, r1)) {
+    if (!index.searchFile(qExact, 0.0, r1)) {
         std::printf("FAIL: exact query unreadable\n");
         ++failures;
     } else {
@@ -176,7 +176,7 @@ int runSelfTest()
         .save(qSim, "PNG");
 
     std::vector<core::SearchResult> r2;
-    if (!index.searchFile(qSim, 20, r2)) {
+    if (!index.searchFile(qSim, 0.0, r2)) {
         std::printf("FAIL: similar query unreadable\n");
         ++failures;
     } else {

@@ -31,4 +31,11 @@ double histIntersection(const std::array<uint8_t, kHistBins>& a,
 double combineScore(const Features& a, const Features& b);
 bool isExactMatch(const Features& a, const Features& b);
 
+// Cheap in-memory ranking signal used to shortlist candidates before the
+// expensive OpenCV comparison runs. It reads only the stored hashes, so it
+// costs no disk I/O and stays usable at whole-filesystem scale. Weights favour
+// the grayscale hashes because those are the signals that survive the color
+// grading this tool is built to tolerate.
+double prefilterScore(const Features& query, const Features& entry);
+
 } // namespace core

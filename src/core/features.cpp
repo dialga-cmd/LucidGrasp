@@ -7,6 +7,7 @@
 
 #include <QColor>
 #include <QFile>
+#include <QImageReader>
 
 namespace core {
 
@@ -188,7 +189,14 @@ bool extractFeatures(const QString& path, Features& out)
     if (out.fileHash == 0)
         return false;
 
-    const QImage img(path);
+    QImageReader reader(path);
+    reader.setAutoTransform(true);
+    const QSize native = reader.size();
+    if (native.isValid() && (native.width() > 512 || native.height() > 512)) {
+        reader.setScaledSize(native.scaled(QSize(512, 512), Qt::KeepAspectRatio));
+    }
+    const QImage img = reader.read();
+
     if (img.isNull())
         return false;
 
@@ -226,6 +234,15 @@ double combineScore(const Features& a, const Features& b)
 bool isExactMatch(const Features& a, const Features& b)
 {
     return a.fileHash != 0 && a.fileHash == b.fileHash;
+}
+
+double prefilterScore(const Features& query, const Features& entry)
+{
+    if (isExactMatch(query, entry))
+        return 1.0;
+    return 0.55 * hammingSimilarity(query.phash, entry.phash)
+        + 0.35 * hammingSimilarity(query.dhash, entry.dhash)
+        + 0.10 * histIntersection(query.hist, entry.hist);
 }
 
 } // namespace core

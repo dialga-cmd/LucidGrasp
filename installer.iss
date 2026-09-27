@@ -1,6 +1,6 @@
 [Setup]
 AppName=LucidGrasp
-AppVersion=1.0.0
+AppVersion=1.1.0
 DefaultDirName={autopf}\LucidGrasp
 DefaultGroupName=LucidGrasp
 OutputBaseFilename=LucidGrasp_Setup_x64

@@ -6,17 +6,21 @@ LucidGrasp runs on Linux and Windows.
 
 ### Current Capabilities
 
-The software focuses on local file system analysis. You point it at a directory containing thousands of photos and it will index all of them. You can then provide a target image and the application will retrieve all visually similar files from the indexed folders. The matching engine is specifically designed to detect edited versions of images, including copies that have been color graded, contrast adjusted, shadow crushed, or had filters applied. A user configurable similarity threshold allows you to control exactly how strict the matching should be.
+The software focuses on local file system analysis. You point it at a directory and it will index every image it can find, all the way up to an entire filesystem. There is no hardcoded limit on library size. You can then provide a target image and the application will retrieve all visually similar files from the indexed folders. The matching engine is specifically designed to detect edited versions of images, including copies that have been color graded, contrast adjusted, shadow crushed, or had filters applied. A user configurable similarity threshold allows you to control exactly how strict the matching should be.
+
+Both indexing and searching run on background threads, so the window stays responsive on libraries of any size and both operations can be cancelled while they run.
 
 ### How It Works
 
-Each search runs three independent comparison algorithms against every indexed image and combines their results into a single similarity percentage.
+Each search runs three independent comparison algorithms and combines their results into a single similarity percentage.
 
 SSIM (Structural Similarity Index) accounts for 45% of the final score. Both images are converted to grayscale and compared based on their shapes, edges, luminance patterns, and contrast. This is completely blind to color changes, which means a raw photo and its color graded edit will still score very high because the underlying structure is identical.
 
 ORB (Oriented FAST and Rotated BRIEF) keypoint matching accounts for 35% of the final score. The algorithm detects up to 500 visually distinctive points in each image (sharp corners, high contrast edges, unique textures) and checks how many of those points exist in both images. This catches structural matches even when images have been cropped or slightly rotated.
 
 Color histogram intersection accounts for 20% of the final score. Both images are converted to the HSV color space and a detailed histogram is built across 3000 bins tracking the exact distribution of every color in the image. The overlap between the two histograms represents the percentage of pixel colors shared between them.
+
+Running those three algorithms against every indexed image would make each search slower the more you index, so searching happens in two stages. Every image is first ranked using the perceptual and difference hashes already stored in the index, which is pure in-memory arithmetic and touches no files. Only the top 256 candidates are then decoded and put through the full OpenCV comparison above. The result is that search time stays essentially constant no matter how large the library gets, while the top of the ranking stays the same as a full scan would produce.
 
 ### Planned Expansion
 
@@ -32,10 +36,10 @@ For Linux, download `lucidgrasp-linux-x64.tar.gz`. You will still need Qt6 and O
 sudo apt install qt6-base-dev libopencv-dev
 tar -xzf lucidgrasp-linux-x64.tar.gz
 cd LucidGrasp
-./image_search
+./LucidGrasp
 ```
 
-For Windows, download `lucidgrasp-windows-x64.zip`. Everything is bundled inside the archive. Extract it anywhere and run `image_search.exe` directly. No additional downloads or installations are required.
+For Windows, download `lucidgrasp-windows-x64.zip`. Everything is bundled inside the archive. Extract it anywhere and run `LucidGrasp.exe` directly. No additional downloads or installations are required.
 
 ### Building from Source (Linux)
 
@@ -66,10 +70,14 @@ make
 4. Launch the application.
 
 ```bash
-./image_search
+./LucidGrasp
 ```
 
 Once running, click "Browse" under Library to select a folder containing images, then click "Index Library" to scan and index them. After indexing, select a query image and click "Search" to find all similar images above the threshold you set.
+
+You can also point the library at `/` to index a whole filesystem. The scan follows symlinked directories (so nothing is missed) while refusing to descend into `/proc`, `/sys`, `/dev`, and `/run`, and it survives permission errors and symlink loops. Expect this to take a long while and to produce a large cache file.
+
+The index is cached per library in `~/.local/share/LucidGrasp/indexes/`, outside the folder being scanned, so indexing a read-only location such as `/usr` works and the index is never indexed itself. Delete that file to force a rebuild.
 
 ### Building from Source (Windows)
 
@@ -90,10 +98,10 @@ cmake .. -G "NMake Makefiles" -DCMAKE_BUILD_TYPE=Release -DOpenCV_DIR="C:\opencv
 nmake
 ```
 
-4. Before running `image_search.exe`, use `windeployqt` to copy the required Qt DLLs into the build folder:
+4. Before running `LucidGrasp.exe`, use `windeployqt` to copy the required Qt DLLs into the build folder:
 
 ```cmd
-windeployqt --release image_search.exe
+windeployqt --release LucidGrasp.exe
 ```
 
 Then copy the OpenCV world DLL from `C:\opencv\opencv\build\x64\vc16\bin\opencv_world*.dll` into the same folder. The application is now ready to run.

@@ -80,9 +80,30 @@ This signal is now weighted at only 20% of the final score. It still adds value 
 
 The final similarity score is calculated as:
 
-    score = (0.45 * ssimScore) + (0.35 * orbScore) + (0.20 * colorScore)
+    score = (0.80 * cvScore) + (0.20 * baseScore)
 
-Two of the three signals (SSIM and ORB) are color invariant, meaning 80% of the total score is immune to color grading. This design decision was made specifically to handle the real world scenario where the same photograph exists in multiple edited versions with different color treatments.
+where cvScore is the 45/35/20 SSIM/ORB/colour blend described above and baseScore is the pHash/dHash/histogram blend from `combineScore`. Two of the three cvScore signals (SSIM and ORB) are colour invariant, meaning 80% of it is immune to colour grading. This is the same weighting that shipped in 1.0; what changed in 1.1 is *how many* images get the expensive treatment, described next.
+
+### Two-Stage Search
+
+In 1.0 the search loop decoded every indexed image and ran the full OpenCV comparison against each one. Cost was therefore linear in library size, and because it ran on the GUI thread the window froze for the entire duration. Measured on the development machine, a 400 image library froze the UI for 27 seconds and a 29,895 image library froze it for 11 minutes 30 seconds. Peak memory was only about 150 MB, so the out-of-memory theory recorded previously was wrong: the real failure was an unresponsive event loop, which users experience as a crash.
+
+Search is now split into two stages.
+
+Stage one ranks every entry in memory using only the hashes already stored in the index, via `prefilterScore`. This touches no files and costs microseconds per entry, so it scales to whole-filesystem indexes. The top `kMinShortlist` entries (256) or `topK * kShortlistFactor`, whichever is larger, are kept. Byte-identical copies are always retained regardless of their prefilter score.
+
+Stage two decodes and re-scores only that shortlist with the full OpenCV comparison. Candidate images are decoded one at a time and released immediately, so peak memory stays flat regardless of library size.
+
+Two further optimisations matter at scale. `CvMatcher` was split into `prepare` and `match`: turning an image into grayscale, ORB descriptors, and a normalised histogram is the expensive half of a comparison, and previously the *query* side was recomputed from scratch for every candidate. The query is now prepared once per search. Result thumbnails in the results grid are decoded straight to 128 px with `QImageReader::setScaledSize` instead of loading full resolution images.
+
+Measured against the 1.0 binary on identical inputs:
+
+| Library | 1.0 search | 1.1 search |
+| --- | --- | --- |
+| 400 images (3000x2000) | 27.4 s, frozen | 10.0 s, responsive |
+| 29,895 images | 690 s, frozen | 1.3 s, responsive |
+
+Per-query cost is now bounded by the shortlist rather than the library, so it no longer grows as more images are indexed. Top-20 overlap against 1.0 was measured over twelve query variants (byte-identical, rescaled, and cropped) of four source images: 234 of 240 results matched, and every difference was a tie at the rank 19/20 boundary where two images scored 0.482 and 0.481. All twelve true matches ranked first under both versions.
 
 ### Threshold Control
 
@@ -90,9 +111,23 @@ The user interface includes a spinbox labeled "Threshold (%)" that defaults to 5
 
 ### Indexing
 
-The indexing process scans a directory recursively for all supported image formats (png, jpg, jpeg, bmp, gif, and any additional formats supported by the Qt image reader plugins installed on the system). For each image found, it extracts the feature set (file hash, pHash, dHash, color histogram) and stores the results in memory. Once complete, the index is serialized to a binary file named .image_search_index.bin in the root of the scanned directory. On subsequent launches, the application can load this cached index instantly without rescanning.
+Indexing runs in two phases. The first walks the directory tree and collects the paths of all supported image formats (png, jpg, jpeg, bmp, gif, and whatever else the installed Qt image reader plugins support, which on a typical Linux install also covers tiff, webp, svg, ico, xpm, and others). The second extracts the feature set (file hash, pHash, dHash, colour histogram) for each file. Progress reports during the first phase carry a total of zero, which the UI renders as an indeterminate busy indicator; the second phase has a real total.
 
-Indexing runs on a background thread and reports progress back to the UI through Qt's queued connection mechanism. The user can cancel the indexing at any time.
+The traversal deliberately follows symlinked directories, because icon themes and shared asset directories are routinely symlinked and skipping them silently drops large parts of a library. An early version of this work refused to follow links and consequently missed 11,707 of 29,941 images in a system directory, which `find(1)` without `-L` cannot see either. Cycles are prevented by de-duplicating the resolved target of each symlinked directory, which is the only way a traversal can loop; a two-directory mutual symlink terminates immediately. Broken links are ignored, unreadable directories are skipped rather than treated as errors, and nesting is capped at 64 levels.
+
+The kernel and device pseudo-filesystems are skipped, both by directory name and by resolved path, so a scan of `/` never descends into `/proc`, `/sys`, `/dev`, or `/run`, even through a symlink.
+
+Once complete, the index is serialised to a binary file under the user's data directory:
+
+    ~/.local/share/LucidGrasp/indexes/<folder>-<hash>.bin
+
+The cache deliberately lives outside the scanned tree. In 1.0 it was written to the root of the scanned directory, which made indexing a read-only location such as `/` or `/usr` impossible: the save failed and, because `main.cpp` discarded the return value of `save()`, the failure was completely silent. The file name combines a readable label with a digest of the *resolved* root path, so two libraries with the same folder name never collide and a relative root such as `.` cannot be confused with a different directory spelled the same way. The pre-1.1 location is still read as a fallback so existing installs keep working; `legacyIndexPath` retains it.
+
+Indexing runs on a background thread and reports progress back to the UI through Qt's queued connection mechanism. The user can cancel indexing at any time, during either phase. The finished index is handed to the UI through a `std::unique_ptr` so the entry vector is not deep-copied twice, which at six-figure entry counts would otherwise cost hundreds of megabytes of pointless allocation.
+
+### Searching
+
+Search also runs on a background thread, with progress reporting and a working Stop button, and the UI stays responsive throughout. While a search is in flight the inputs that would invalidate the in-memory index are disabled, since the worker reads the index directly rather than working on a copy.
 
 ## Release Pipeline
 
@@ -104,7 +139,7 @@ The Linux job runs on ubuntu-latest. It installs Qt6, OpenCV, and g++ through ap
 
 ### Windows Build
 
-The Windows job runs on windows-latest. It installs Qt6 using the jurplel/install-qt-action GitHub Action, downloads the official OpenCV pre built Windows binaries, sets up MSVC through ilammy/msvc-dev-cmd, and builds the project with NMake. After compilation, it runs windeployqt to automatically copy all required Qt DLLs, plugins, and platform files into the output directory, and then copies the OpenCV world DLL alongside the executable. The entire folder is compressed into a zip file named lucidgrasp-windows-x64.zip. Windows users can extract this archive anywhere and run image_search.exe immediately with zero additional setup.
+The Windows job runs on windows-latest. It installs Qt6 using the jurplel/install-qt-action GitHub Action, downloads the official OpenCV pre built Windows binaries, sets up MSVC through ilammy/msvc-dev-cmd, and builds the project with NMake. After compilation, it runs windeployqt to automatically copy all required Qt DLLs, plugins, and platform files into the output directory, and then copies the OpenCV world DLL alongside the executable. The bundled folder is then compiled into a Windows installer with Inno Setup 6 from installer.iss, producing LucidGrasp_Setup_x64.exe. Windows users run the installer and get a start menu and optional desktop shortcut with zero additional setup.
 
 ## Testing Results
 
@@ -114,4 +149,13 @@ The matching engine has been tested with both raw and edited versions of photogr
 
 ## Known Issues
 
-There is a crash that occurs when performing a search on large indexed directories (100+ images). The indexing itself completes without any problems, but when the user selects an image and initiates a search against the full index, the application gets killed by the operating system. The search function loads every indexed image from disk and resizes it to 256x256 before running the OpenCV comparison, which significantly reduces per image memory usage compared to the original full resolution approach. Despite this, processing hundreds of images sequentially still accumulates enough memory pressure to trigger the OOM killer on systems with limited RAM. This issue will be investigated and fixed in the next development cycle. Potential solutions include processing images in smaller batches with explicit memory release between batches, or precomputing and caching the SSIM and ORB descriptors in the index file so raw images do not need to be loaded during search at all.
+The previously documented crash on large libraries is resolved. The original note blamed memory exhaustion, but instrumentation showed that peak resident memory during both indexing and search stayed around 150 MB for a 400 image library, which is nowhere near an out-of-memory condition. The actual failure was that `startSearch` ran the entire search synchronously on the GUI thread. A 500 ms heartbeat timer confirmed the Qt event loop stopped being serviced for the whole duration of the search, so the window stopped painting, stopped responding to close, and had to be killed from outside, which is what a crash looks like to a user. The OOM theory was a plausible-sounding guess that measurement disproved.
+
+What remains is a performance characteristic rather than a defect. The two-stage search bounds per-query work to the shortlist size, but each shortlisted candidate is still fully decoded and run through SSIM and ORB, so a query costs roughly 40 ms per shortlisted image on a large photograph. On a 400 image library of 3000x2000 photographs that works out to about 10 seconds. The obvious next step, if it is ever needed, is to cache a compact per-image descriptor in the index file so stage two does not have to reopen the image at all, which would cut indexing cost in exchange for a much larger index file.
+
+There is a deliberate recall trade-off in the prefilter. It ranks on pHash, dHash, and the colour histogram, so a candidate that would score well purely on ORB keypoint overlap, such as a heavily cropped or rotated version of the query, can in principle be ranked out of the shortlist before the accurate comparison ever runs. The shortlist is 256 entries, which measured ample in testing, and the constant `ImageIndex::kMinShortlist` is the knob to raise it if unusual workloads show misses. Raising it costs proportionally more search time and nothing else.
+
+A second, genuinely fatal bug was found and fixed at the same time. `ImageIndex::load` read an entry count straight out of the cache file and used it to resize a vector with no validation, so a corrupt or truncated file caused an enormous allocation and an unhandled `std::bad_alloc`. Verified by taking a valid 1,642 byte index, overwriting its count field with 0x7FFFFFF0, and loading it: the 1.0 binary aborts with `terminate called after throwing an instance of 'std::bad_alloc'` and dumps core, while 1.1 rejects the file and rebuilds. This is a plausible explanation for reports of the application failing to start, because a cache truncated by an earlier crash or a full disk persists and would abort every subsequent launch. `load` now cross-checks the declared count against the file size, since each entry needs at least a path, three hashes, and a 256 byte histogram.
+
+Scanning a whole filesystem is now practical but not free. Indexing 364,505 files discovered on a typical Linux root filesystem takes on the order of an hour on spinning storage, and the resulting index file is a few hundred megabytes. The discovery phase reports an indeterminate progress bar because the total is not known until the walk finishes, which can itself take several minutes on a cold cache.
+

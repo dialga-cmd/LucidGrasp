@@ -24,6 +24,9 @@ Makefile
 # Application data
 .image_search_index.bin
 
+# Brag video output
+brag-output/
+
 # Third-party libraries (downloaded/extracted)
 third_party/
 

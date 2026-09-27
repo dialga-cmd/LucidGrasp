@@ -56,7 +56,7 @@ jobs:
         version: '6.5.*'
         host: 'windows'
         target: 'desktop'
-        arch: 'win64_msvc2019_64'
+        arch: 'win64_msvc2022_64'
 
     - name: Install OpenCV
       shell: pwsh
@@ -69,8 +69,6 @@ jobs:
 
     - name: Setup MSVC
       uses: ilammy/msvc-dev-cmd@v1
-      with:
-        toolset: '14.29'
 
     - name: Build Project
       shell: pwsh
@@ -96,6 +94,11 @@ jobs:
         # Copy the OpenCV world DLL
         $opencvBin = "$env:OpenCV_DIR\x64\vc16\bin"
         Copy-Item "$opencvBin\opencv_world*.dll" $dest\
+
+    - name: Install Inno Setup
+      shell: pwsh
+      run: |
+        choco install innosetup -y --no-progress
 
     - name: Compile Windows Installer
       shell: pwsh

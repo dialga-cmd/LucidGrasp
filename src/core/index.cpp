@@ -3,12 +3,16 @@
 #include <algorithm>
 
 #include <QDataStream>
+#include <QCryptographicHash>
 #include <QDir>
-#include <QImage>
-#include <QDirIterator>
 #include <QFile>
+#include <QImage>
 #include <QImageReader>
+#include <QRegularExpression>
 #include <QSet>
+#include <QStandardPaths>
+#include <QStack>
+#include <QElapsedTimer>
 
 namespace core {
 
@@ -17,10 +21,142 @@ namespace {
 constexpr quint32 kMagic = 0x494D5349; // "IMSI"
 constexpr quint32 kVersion = 1;
 
+// Guards against pathological nesting in a whole-filesystem scan.
+constexpr int kMaxScanDepth = 64;
+
+// Directories visited between discovery progress reports.
+constexpr int kDiscoveryReportInterval = 256;
+
+const QSet<QString> &systemDirNames()
+{
+  static const QSet<QString> names = {
+      QStringLiteral("proc"), QStringLiteral("sys"),
+      QStringLiteral("dev"),  QStringLiteral("run"),
+  };
+  return names;
+}
+
+bool isSystemPath(const QString &path)
+{
+  if (path.isEmpty())
+    return false;
+  for (const QString &name : systemDirNames()) {
+    const QString prefix = QLatin1Char('/') + name;
+    if (path == prefix || path.startsWith(prefix + QLatin1Char('/')))
+      return true;
+  }
+  return false;
+}
+
+// Absolute, symlink-resolved form of a library root. Falls back to the plain
+// absolute path when the root does not exist yet.
+QString resolveRoot(const QString &rootDir)
+{
+  const QString canonical = QFileInfo(rootDir).canonicalFilePath();
+  return canonical.isEmpty() ? QDir(rootDir).absolutePath() : canonical;
+}
+
+// Walk the tree collecting candidate files. Returns false from `keepGoing` to
+// abandon the walk. Unreadable directories are skipped rather than treated as
+// errors.
+//
+// Symlinked directories are followed, because icon themes and shared asset
+// directories are routinely symlinked and skipping them would silently drop
+// large parts of a library. Cycles are prevented by de-duplicating resolved
+// paths of symlinked directories, which is the only way a traversal can loop.
+bool collectImages(const QString &startDir, QStringList &out,
+                   const std::function<bool(int)> &keepGoing)
+{
+  QSet<QString> visitedSymlinks;
+  QStack<QPair<QString, int>> pending;
+  pending.push({startDir, 0});
+  int seen = 0;
+
+  while (!pending.isEmpty()) {
+    if (keepGoing && !keepGoing(seen))
+      return false;
+    ++seen;
+
+    const auto current = pending.pop();
+    const QString &dir = current.first;
+    const int depth = current.second;
+
+    const QFileInfoList entries =
+        QDir(dir).entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot |
+                                    QDir::Hidden | QDir::System,
+                                QDir::Name);
+    for (const QFileInfo &fi : entries) {
+      if (fi.isDir()) {
+        if (ImageIndex::isSkippedSystemDir(fi.fileName()))
+          continue;
+        const QString path = fi.absoluteFilePath();
+        if (fi.isSymLink()) {
+          const QString canonical = fi.canonicalFilePath();
+          if (canonical.isEmpty())
+            continue; // broken link
+          if (isSystemPath(canonical))
+            continue; // link into a kernel or device pseudo-filesystem
+          if (visitedSymlinks.contains(canonical))
+            continue; // already walked this target; breaks cycles
+          visitedSymlinks.insert(canonical);
+        }
+        if (depth + 1 > kMaxScanDepth)
+          continue;
+        // Traverse via the link path so recorded relative paths stay under the
+        // scanned root; the resolved path is used only for cycle detection.
+        pending.push({path, depth + 1});
+      } else if (fi.isFile() && isSupportedImage(fi.fileName())) {
+        out.append(fi.absoluteFilePath());
+      }
+    }
+  }
+  return true;
+}
+
 } // namespace
 
+bool ImageIndex::isSkippedSystemDir(const QString &dirName)
+{
+  return systemDirNames().contains(dirName);
+}
+
 QString defaultIndexPath(const QString &rootDir) {
-  return QDir(rootDir).filePath(QStringLiteral(".image_search_index.bin"));
+  // Built from the generic data location rather than AppDataLocation, which
+  // would repeat the organisation and application name in the path.
+  QString base = QStandardPaths::writableLocation(
+      QStandardPaths::GenericDataLocation);
+  if (base.isEmpty())
+    base = QDir::homePath() + QStringLiteral("/.local/share");
+  base += QStringLiteral("/LucidGrasp");
+
+  const QString dir = base + QStringLiteral("/indexes");
+  QDir().mkpath(dir);
+
+  // Resolve to a real path first: the cache is keyed by the library it
+  // describes, so a relative root such as "." must not collide with a
+  // different directory that happens to be spelled the same way.
+  const QString root = resolveRoot(rootDir);
+
+  // Readable label plus a digest of the resolved path, so two libraries with
+  // the same folder name never collide.
+  QString label = QDir(root).dirName();
+  if (label.isEmpty())
+    label = QStringLiteral("root");
+  label.replace(QRegularExpression(QStringLiteral("[^A-Za-z0-9._-]")),
+                QStringLiteral("_"));
+  if (label.size() > 40)
+    label.truncate(40);
+
+  const QString digest = QString::fromLatin1(
+      QCryptographicHash::hash(root.toUtf8(), QCryptographicHash::Sha1)
+          .toHex()
+          .left(16));
+  return QStringLiteral("%1/%2-%3.bin").arg(dir, label, digest);
+}
+
+QString legacyIndexPath(const QString &rootDir) {
+  return QDir(resolveRoot(rootDir))
+      .filePath(QStringLiteral(".image_search_index.bin"));
 }
 
 QStringList supportedImageExtensions() {
@@ -53,26 +189,37 @@ bool ImageIndex::build(const QString &rootDir, ProgressFn progress) {
   const QDir root(rootDir);
   if (!root.exists())
     return false;
-  root_ = root.absolutePath();
+  root_ = resolveRoot(rootDir);
 
+  QElapsedTimer progressTimer;
+  progressTimer.start();
+
+  // Phase 1: discover candidate files. total == 0 signals "still scanning".
+  // Reports are throttled using a timer so we don't spam the UI queue
+  // and we don't freeze the UI.
   QStringList files;
-  QDirIterator it(root_, QDir::Files | QDir::Readable | QDir::Hidden,
-                  QDirIterator::Subdirectories);
-  while (it.hasNext()) {
-    const QString p = it.next();
-    if (isSupportedImage(p))
-      files.append(p);
-  }
+  const bool complete = collectImages(
+      root_, files, [&](int seen) {
+        if (!progress)
+          return true;
+        if (progressTimer.elapsed() < 50)
+          return true;
+        progressTimer.restart();
+        return progress({0, 0, QStringLiteral("%1 directories").arg(seen)});
+      });
+  if (!complete)
+    return false; // cancelled
+  if (progress)
+    progress({0, 0, QStringLiteral("%1 images found").arg(files.size())});
 
+  // Phase 2: extract features, with a real total for the progress bar.
   const int total = files.size();
   int done = 0;
-  int lastReportedPct = -1;
 
   for (const QString &file : files) {
     if (progress) {
-      const int pct = total > 0 ? done * 100 / total : 100;
-      if (pct != lastReportedPct || done == total - 1) {
-        lastReportedPct = pct;
+      if (progressTimer.elapsed() >= 50 || done == total - 1) {
+        progressTimer.restart();
         if (!progress({done, total, file}))
           return false; // cancelled
       }
@@ -129,6 +276,14 @@ bool ImageIndex::load(const QString &filePath) {
   if (in.status() != QDataStream::Ok || magic != kMagic || version != kVersion)
     return false;
 
+  // Each entry needs at least a path, three hashes, and the histogram, so a
+  // file claiming more entries than it could physically hold is corrupt.
+  // Resizing to an unchecked count would attempt an enormous allocation.
+  constexpr qint64 kMinBytesPerEntry =
+      2 * sizeof(quint64) + 3 * sizeof(quint64) + kHistBins;
+  if (qint64(count) * kMinBytesPerEntry > f.size())
+    return false;
+
   entries_.resize(count);
   errors_ = errors;
   for (IndexEntry &e : entries_) {
@@ -151,59 +306,85 @@ bool ImageIndex::load(const QString &filePath) {
 }
 
 std::vector<SearchResult> ImageIndex::search(const Features &query,
-                                             const QImage &queryImage,
-                                             int topK) const {
+                                             const QImage &queryImage, double threshold,
+                                             SearchProgressFn progress) const {
   std::vector<SearchResult> results;
-  if (entries_.empty() || topK <= 0)
+  if (entries_.empty())
     return results;
 
-  results.reserve(entries_.size());
-  const QDir root(root_);
-  
-  CvMatcher cvMatcher;
+  // --- Stage 1: in-memory shortlist -----------------------------------
+  // Reads only the stored hashes. We use a relaxed prefilter threshold to catch
+  // anything that OpenCV might push above the final threshold.
+  struct Candidate {
+    double prefilter = 0.0;
+    uint32_t entry = 0;
+    bool exact = false;
+  };
+  std::vector<Candidate> ranked;
+  // OpenCV contributes 0.8, prefilter 0.2. So max possible score is 0.8 + 0.2 * prefilter.
+  // We only keep candidates where max possible score >= threshold.
+  for (size_t i = 0; i < entries_.size(); ++i) {
+    bool exact = isExactMatch(query, entries_[i].features);
+    double p = prefilterScore(query, entries_[i].features);
+    if (exact || (0.8 + 0.2 * p >= threshold)) {
+      ranked.push_back({p, uint32_t(i), exact});
+    }
+  }
 
-  for (const IndexEntry &e : entries_) {
+  // --- Stage 2: OpenCV re-score of the shortlist -------------------
+  CvMatcher matcher;
+  const CvMatcher::Prepared preparedQuery = matcher.prepare(queryImage);
+
+  const QDir root(root_);
+  const int total = int(ranked.size());
+  int done = 0;
+
+  QElapsedTimer progressTimer;
+  progressTimer.start();
+
+  for (size_t k = 0; k < ranked.size(); ++k) {
+    if (progress) {
+      if (progressTimer.elapsed() >= 50 || done == total - 1) {
+        progressTimer.restart();
+        if (!progress(done, total))
+          return {}; // cancelled
+      }
+    }
+
+    const IndexEntry &e = entries_[ranked[k].entry];
     SearchResult r;
     r.relPath = e.relPath;
     r.absPath = root.absoluteFilePath(e.relPath);
-    
-    // Perform detailed OpenCV pixel matching
-    QImage dbImg(r.absPath);
-    double cvScore = cvMatcher.match(queryImage, dbImg);
-    
-    // Combine feature score and OpenCV pixel score
-    double baseScore = combineScore(query, e.features);
-    r.score = 0.8 * cvScore + 0.2 * baseScore;
-    
-    r.exact = isExactMatch(query, e.features);
-    results.push_back(std::move(r));
-  }
+    r.exact = ranked[k].exact;
 
-  if (int(results.size()) > topK) {
-    std::partial_sort(results.begin(), results.begin() + topK, results.end(),
-                      [](const SearchResult &a, const SearchResult &b) {
-                        if (a.score != b.score)
-                          return a.score > b.score;
-                        return a.relPath < b.relPath;
-                      });
-    results.resize(topK);
-  } else {
-    std::sort(results.begin(), results.end(),
-              [](const SearchResult &a, const SearchResult &b) {
-                if (a.score != b.score)
-                  return a.score > b.score;
-                return a.relPath < b.relPath;
-              });
+    const CvMatcher::Prepared preparedCandidate = matcher.prepare(QImage(r.absPath));
+    r.score = 0.8 * matcher.match(preparedQuery, preparedCandidate) +
+              0.2 * ranked[k].prefilter;
+
+    if (r.exact || r.score >= threshold) {
+      results.push_back(std::move(r));
+    }
+    ++done;
   }
+  if (progress)
+    progress(done, total);
+
+  std::sort(results.begin(), results.end(),
+            [](const SearchResult &a, const SearchResult &b) {
+              if (a.score != b.score)
+                return a.score > b.score;
+              return a.relPath < b.relPath;
+            });
   return results;
 }
 
-bool ImageIndex::searchFile(const QString &queryPath, int topK,
-                            std::vector<SearchResult> &out) const {
+bool ImageIndex::searchFile(const QString &queryPath, double threshold,
+                            std::vector<SearchResult> &out,
+                            SearchProgressFn progress) const {
   Features feat;
   if (!extractFeatures(queryPath, feat))
     return false;
-  out = search(feat, QImage(queryPath), topK);
+  out = search(feat, QImage(queryPath), threshold, std::move(progress));
   return true;
 }
 

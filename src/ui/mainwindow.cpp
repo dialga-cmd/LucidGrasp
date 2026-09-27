@@ -24,7 +24,7 @@
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
 {
-    setWindowTitle(QStringLiteral("Image Similarity Search"));
+    setWindowTitle(QStringLiteral("LucidGrasp"));
 
     auto* central = new QWidget(this);
     auto* rootLayout = new QHBoxLayout(central);
@@ -124,6 +124,8 @@ MainWindow::~MainWindow()
     cancel_ = true;
     if (worker_.joinable())
         worker_.join();
+    if (searchWorker_.joinable())
+        searchWorker_.join();
 }
 
 void MainWindow::browseLibrary()
@@ -140,8 +142,13 @@ void MainWindow::browseLibrary()
 void MainWindow::tryLoadIndex(const QString& dir)
 {
     results_->clear();
+    // Fall back to the pre-1.1 cache location so existing installs keep
+    // working; the next reindex writes to the new path.
     const QString path = core::defaultIndexPath(dir);
-    if (QFile::exists(path) && index_.load(path) && !index_.empty()) {
+    const QString legacy = core::legacyIndexPath(dir);
+    const QString load = QFile::exists(path) ? path : legacy;
+
+    if (QFile::exists(load) && index_.load(load) && !index_.empty()) {
         stats_->setText(QStringLiteral("Loaded cached index: %1 images (%2 skipped)")
                             .arg(index_.size())
                             .arg(index_.errorCount()));
@@ -160,6 +167,8 @@ void MainWindow::startIndex()
         stopIndex();
         return;
     }
+    if (searching_)
+        return; // a search holds index_; let it finish or stop it first
     const QString root = libEdit_->text();
     if (root.isEmpty())
         return;
@@ -168,14 +177,15 @@ void MainWindow::startIndex()
     cancel_ = false;
     indexBtn_->setText(QStringLiteral("Stop Index"));
     indexBtn_->setToolTip(QStringLiteral("Stop and discard all data indexed so far"));
+    progress_->setRange(0, 100);
     progress_->setValue(0);
     results_->clear();
-    updateActions();
+    setBusy(true);
     statusBar()->showMessage(QStringLiteral("Indexing…"));
 
     worker_ = std::thread([this, root] {
-        core::ImageIndex idx;
-        const bool ok = idx.build(root, [this](const core::BuildProgress& p) {
+        auto idx = std::make_unique<core::ImageIndex>();
+        const bool ok = idx->build(root, [this](const core::BuildProgress& p) {
             QMetaObject::invokeMethod(
                 this,
                 [this, done = p.done, total = p.total, cur = p.current] {
@@ -185,6 +195,8 @@ void MainWindow::startIndex()
             return !cancel_.load();
         });
 
+        // Handed over by pointer: the entry vector is no longer deep-copied
+        // twice (once into the queued event, once for a by-value parameter).
         QMetaObject::invokeMethod(
             this,
             [this, ok, idx = std::move(idx)]() mutable {
@@ -196,16 +208,21 @@ void MainWindow::startIndex()
 
 void MainWindow::onIndexProgress(int done, int total, const QString& current)
 {
-    if (total > 0) {
-        progress_->setValue(done * 100 / total);
-        stats_->setText(QStringLiteral("Indexing %1/%2\n%3")
-                            .arg(done)
-                            .arg(total)
-                            .arg(QFileInfo(current).fileName()));
+    if (total <= 0) {
+        // Discovery phase: the total file count is not known yet.
+        progress_->setRange(0, 0); // busy indicator
+        stats_->setText(QStringLiteral("Scanning for images…\n%1").arg(current));
+        return;
     }
+    progress_->setRange(0, 100);
+    progress_->setValue(done * 100 / total);
+    stats_->setText(QStringLiteral("Indexing %1/%2\n%3")
+                        .arg(done)
+                        .arg(total)
+                        .arg(QFileInfo(current).fileName()));
 }
 
-void MainWindow::onIndexFinished(bool ok, core::ImageIndex index)
+void MainWindow::onIndexFinished(bool ok, std::unique_ptr<core::ImageIndex> index)
 {
     if (worker_.joinable())
         worker_.join();
@@ -214,18 +231,17 @@ void MainWindow::onIndexFinished(bool ok, core::ImageIndex index)
     indexBtn_->setToolTip(QString());
     indexing_ = false;
 
-    if (!ok || cancel_) {
+    if (!ok || cancel_ || !index) {
         stats_->setText(QStringLiteral("Indexing cancelled."));
         statusBar()->showMessage(QStringLiteral("Indexing cancelled"), 4000);
-        updateActions();
+        setBusy(false);
         return;
     }
 
     progress_->setValue(100);
-    index_ = std::move(index);
+    index_ = std::move(*index);
 
-    const QString idxPath = core::defaultIndexPath(libEdit_->text());
-    const bool saved = index_.save(idxPath);
+    const bool saved = index_.save(core::defaultIndexPath(libEdit_->text()));
 
     stats_->setText(
         QStringLiteral("Indexed %1 images (%2 skipped)%3")
@@ -234,7 +250,7 @@ void MainWindow::onIndexFinished(bool ok, core::ImageIndex index)
             .arg(saved ? QStringLiteral(", index saved")
                        : QStringLiteral(", cache save failed")));
     statusBar()->showMessage(QStringLiteral("Indexing complete"), 4000);
-    updateActions();
+    setBusy(false);
 }
 
 void MainWindow::stopIndex()
@@ -244,9 +260,9 @@ void MainWindow::stopIndex()
 
     cancel_ = true;
     indexBtn_->setText(QStringLiteral("Stopping..."));
-    indexBtn_->setEnabled(false);
+    setBusy(true);
+    indexBtn_->setEnabled(false); // stay disabled until the worker reports back
     statusBar()->showMessage(QStringLiteral("Stopping... partial index will be discarded"), 4000);
-    updateActions();
 }
 
 void MainWindow::browseQuery()
@@ -292,6 +308,10 @@ void MainWindow::showPreview(const QString& path)
 
 void MainWindow::startSearch()
 {
+    if (searching_) {
+        stopSearch();
+        return;
+    }
     if (index_.empty()) {
         QMessageBox::information(this, QStringLiteral("No index"),
                                  QStringLiteral("Index a library first."));
@@ -304,28 +324,107 @@ void MainWindow::startSearch()
         return;
     }
 
-    QElapsedTimer timer;
-    timer.start();
+    searching_ = true;
+    cancel_ = false;
+    searchBtn_->setText(QStringLiteral("Stop Search"));
+    searchBtn_->setToolTip(QStringLiteral("Stop the search"));
+    progress_->setRange(0, 100);
+    progress_->setValue(0);
+    results_->clear();
+    setBusy(true);
+    statusBar()->showMessage(QStringLiteral("Searching…"));
+    searchTimer_.start();
 
-    std::vector<core::SearchResult> results;
-    if (!index_.searchFile(query, 20, results)) {
+    // Runs off the GUI thread so the window stays responsive and cancellable
+    // no matter how large the library is. index_ is only read here, and the
+    // UI is locked out until onSearchFinished, so there is no shared mutation.
+    const double threshold = thresholdSpin_->value() / 100.0;
+    searchWorker_ = std::thread([this, query, threshold] {
+        std::vector<core::SearchResult> results;
+        const bool ok = index_.searchFile(
+            query, threshold, results, [this](int done, int total) {
+                QMetaObject::invokeMethod(
+                    this, [this, done, total] { onSearchProgress(done, total); },
+                    Qt::QueuedConnection);
+                return !cancel_.load();
+            });
+
+        QMetaObject::invokeMethod(
+            this,
+            [this, ok, results = std::move(results)]() mutable {
+                onSearchFinished(ok, std::move(results));
+            },
+            Qt::QueuedConnection);
+    });
+}
+
+void MainWindow::stopSearch()
+{
+    if (!searching_)
+        return;
+
+    cancel_ = true;
+    searchBtn_->setText(QStringLiteral("Stopping..."));
+    searchBtn_->setEnabled(false);
+    statusBar()->showMessage(QStringLiteral("Stopping..."), 4000);
+}
+
+void MainWindow::onSearchProgress(int done, int total)
+{
+    if (total > 0) {
+        progress_->setValue(done * 100 / total);
+        stats_->setText(QStringLiteral("Comparing %1/%2").arg(done).arg(total));
+    }
+}
+
+void MainWindow::onSearchFinished(bool ok, std::vector<core::SearchResult> results)
+{
+    if (searchWorker_.joinable())
+        searchWorker_.join();
+
+    searching_ = false;
+    searchBtn_->setText(QStringLiteral("Search"));
+    searchBtn_->setToolTip(QString());
+    setBusy(false);
+
+    if (!ok || cancel_) {
+        stats_->setText(QStringLiteral("Search cancelled."));
+        statusBar()->showMessage(QStringLiteral("Search cancelled"), 4000);
+        return;
+    }
+    if (results.empty()) {
         QMessageBox::warning(this, QStringLiteral("Error"),
                              QStringLiteral("Could not read query image."));
         return;
     }
-    const qint64 ms = timer.elapsed();
 
+    const qint64 ms = searchTimer_.isValid() ? searchTimer_.elapsed() : 0;
+    renderResults(results);
+    statusBar()->showMessage(
+        QStringLiteral("Found %1 results in %2 ms")
+            .arg(results_->count())
+            .arg(ms),
+        5000);
+}
+
+void MainWindow::renderResults(const std::vector<core::SearchResult>& results)
+{
     results_->clear();
     for (const auto& r : results) {
-        const QPixmap pm(r.absPath);
-        QIcon icon(pm.scaled({128, 128}, Qt::KeepAspectRatio,
-                             Qt::SmoothTransformation));
-
         const int pct = int(r.score * 100.0 + 0.5);
-        if (pct < thresholdSpin_->value()) continue;
-        
+        if (pct < thresholdSpin_->value())
+            continue;
+
+        // Decode straight to thumbnail size rather than loading the full
+        // image, which matters when results can be very large photographs.
+        QImageReader reader(r.absPath);
+        const QSize native = reader.size();
+        if (native.isValid() && !native.isEmpty())
+            reader.setScaledSize(native.scaled(QSize(128, 128), Qt::KeepAspectRatio));
+        const QImage thumb = reader.read();
+
         auto* item = new QListWidgetItem(
-            icon,
+            QIcon(QPixmap::fromImage(thumb)),
             QStringLiteral("%1%2\n%3")
                 .arg(r.exact ? QStringLiteral("EXACT ") : QString())
                 .arg(pct)
@@ -338,12 +437,16 @@ void MainWindow::startSearch()
         item->setSizeHint({170, 200});
         results_->addItem(item);
     }
+}
 
-    statusBar()->showMessage(
-        QStringLiteral("Found %1 results in %2 ms")
-            .arg(results.size())
-            .arg(ms),
-        5000);
+void MainWindow::setBusy(bool busy)
+{
+    // While a worker holds index_ or the result set, the inputs that would
+    // invalidate them are locked out.
+    browseLibBtn_->setEnabled(!busy);
+    browseQueryBtn_->setEnabled(!busy);
+    thresholdSpin_->setEnabled(!busy);
+    updateActions();
 }
 
 void MainWindow::openResult(QListWidgetItem* item)
@@ -355,10 +458,10 @@ void MainWindow::openResult(QListWidgetItem* item)
 
 void MainWindow::updateActions()
 {
-    const bool canIndex = !indexing_ && !libEdit_->text().isEmpty();
+    const bool busy = indexing_ || searching_;
+    const bool canIndex = !busy && !libEdit_->text().isEmpty();
     indexBtn_->setEnabled(indexing_ || canIndex);
-    browseLibBtn_->setEnabled(!indexing_);
-    browseQueryBtn_->setEnabled(!indexing_);
-    searchBtn_->setEnabled(!indexing_ && !index_.empty()
-                           && !queryEdit_->text().isEmpty());
+    browseLibBtn_->setEnabled(!busy);
+    browseQueryBtn_->setEnabled(!busy);
+    searchBtn_->setEnabled(busy ? searching_ : (!index_.empty() && !queryEdit_->text().isEmpty()));
 }
