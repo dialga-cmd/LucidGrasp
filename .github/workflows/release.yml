@@ -53,10 +53,14 @@ jobs:
     - name: Install Qt6
       uses: jurplel/install-qt-action@v4
       with:
+        # Qt 6.5 LTS only ships MSVC 2019 (v142) desktop binaries for Windows.
+        # There is no win64_msvc2022_64 build for any 6.5.x release, so asking
+        # for it makes aqt fall back and fail with
+        # "The packages ['qt_base'] were not found".
         version: '6.5.*'
         host: 'windows'
         target: 'desktop'
-        arch: 'win64_msvc2022_64'
+        arch: 'win64_msvc2019_64'
 
     - name: Install OpenCV
       shell: pwsh
@@ -69,6 +73,10 @@ jobs:
 
     - name: Setup MSVC
       uses: ilammy/msvc-dev-cmd@v1
+      with:
+        # Match the v142 toolset that both Qt 6.5 msvc2019_64 and the OpenCV
+        # 4.10.0 vc16 prebuilt binaries were compiled with.
+        toolset: '14.29'
 
     - name: Build Project
       shell: pwsh
