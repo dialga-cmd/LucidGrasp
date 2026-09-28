@@ -139,13 +139,24 @@ jobs:
         # copy of it: it is already in project(... VERSION ...) and already
         # compiled into the binary, so this makes the installer agree with both
         # instead of drifting from whichever one someone remembers to bump.
+        # The entry is CMAKE_PROJECT_VERSION, not PROJECT_VERSION. project()
+        # sets PROJECT_VERSION as an ordinary variable, which CMake never
+        # writes to the cache, so a search for the bare name finds nothing.
         $cache = Get-Content build\CMakeCache.txt
-        $match = $cache | Select-String '^PROJECT_VERSION:STATIC=(.+)$'
-        if (-not $match) { throw "PROJECT_VERSION not found in CMakeCache.txt" }
+        $match = $cache | Select-String '^CMAKE_PROJECT_VERSION:STATIC=(.+)$'
+        if (-not $match) {
+          Write-Host "VERSION entries actually present in CMakeCache.txt:"
+          $cache | Select-String 'VERSION' | ForEach-Object { Write-Host "  $_" }
+          throw "CMAKE_PROJECT_VERSION not found in CMakeCache.txt"
+        }
         $version = $match.Matches[0].Groups[1].Value
         echo "Installer version: $version"
+
+        # [^\r\n]* rather than .*$ because the file is read raw: a greedy .*
+        # would swallow the \r of a CRLF line ending and leave the rewritten
+        # line with a mismatched terminator.
         (Get-Content installer.iss -Raw) `
-          -replace '(?m)^AppVersion=.*$', "AppVersion=$version" `
+          -replace '(?m)^AppVersion=[^\r\n]*', "AppVersion=$version" `
           | Set-Content installer.iss -NoNewline
         & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
         if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
