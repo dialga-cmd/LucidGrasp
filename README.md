@@ -10,6 +10,10 @@ The software focuses on local file system analysis. You point it at a directory 
 
 Both indexing and searching run on background threads, so the window stays responsive on libraries of any size and both operations can be cancelled while they run.
 
+The window takes its colours from the operating system. Every surface, accent, border and text colour is read out of the desktop palette rather than chosen by hand, so LucidGrasp follows the system light or dark scheme along with your accent colour. A square button in the top right switches between the two.
+
+On launch the application checks GitHub for a newer release and tells you if there is one. It does this at most once a day, and never silently: you can turn it off permanently, or ask for it on demand, from the Help menu. It only reads the release page — nothing is ever downloaded or installed without you asking.
+
 ### How It Works
 
 Each search runs three independent comparison algorithms and combines their results into a single similarity percentage.
@@ -39,7 +43,7 @@ cd LucidGrasp
 ./LucidGrasp
 ```
 
-For Windows, download `lucidgrasp-windows-x64.zip`. Everything is bundled inside the archive. Extract it anywhere and run `LucidGrasp.exe` directly. No additional downloads or installations are required.
+For Windows, download `LucidGrasp_Setup_x64.exe` and run it. Everything is bundled inside the installer. It installs to a standard location, adds a start menu entry and an optional desktop shortcut, and there is nothing else to download or install. To uninstall, use Add or Remove Programs in Windows Settings.
 
 ### Building from Source (Linux)
 
@@ -73,6 +77,12 @@ make
 ./LucidGrasp
 ```
 
+If you would rather confirm the build is sound before opening a window, `--selftest` builds a synthetic image corpus, indexes it, and verifies that edited and rescaled copies rank above unrelated distractors, along with the update checker's version and payload handling. It needs no network and no display.
+
+```bash
+./LucidGrasp --selftest
+```
+
 Once running, click "Browse" under Library to select a folder containing images, then click "Index Library" to scan and index them. After indexing, select a query image and click "Search" to find all similar images above the threshold you set.
 
 You can also point the library at `/` to index a whole filesystem. The scan follows symlinked directories (so nothing is missed) while refusing to descend into `/proc`, `/sys`, `/dev`, and `/run`, and it survives permission errors and symlink loops. Expect this to take a long while and to produce a large cache file.
@@ -81,13 +91,15 @@ The index is cached per library in `~/.local/share/LucidGrasp/indexes/`, outside
 
 ### Building from Source (Windows)
 
-You will need Visual Studio 2022 (or the MSVC Build Tools), CMake, Qt6, and OpenCV pre built binaries for Windows.
+You will need the MSVC Build Tools or Visual Studio, CMake, Qt6, and OpenCV pre built binaries for Windows.
 
-1. Install Qt6 using the official Qt Online Installer. Select the MSVC 2022 64 bit component during installation.
+The Qt version is the constraint worth knowing about first. Qt 6.5 LTS ships MSVC 2019 (the `v142` toolset) for Windows desktop, and no `win64_msvc2022_64` build exists for any 6.5.x release. If you try to install Qt through the Qt Online Installer and pick the MSVC 2022 64 bit component, aqt will fail to find the packages. Use the MSVC 2019 64 bit component instead, and build with the `v142` toolset.
+
+1. Install Qt6 using the official Qt Online Installer. Select the MSVC 2019 64 bit component during installation.
 
 2. Download the OpenCV Windows release from the official OpenCV GitHub releases page. Extract it to a known location (for example `C:\opencv`).
 
-3. Open a Developer Command Prompt for VS 2022 and run:
+3. Open a Developer Command Prompt for the 2019 toolset and run:
 
 ```cmd
 git clone https://github.com/dialga-cmd/LucidGrasp.git

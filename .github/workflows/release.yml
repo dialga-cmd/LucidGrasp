@@ -27,6 +27,11 @@ jobs:
         cmake ..
         make -j$(nproc)
 
+    - name: Self Test
+      run: |
+        cd build
+        QT_QPA_PLATFORM=offscreen ./LucidGrasp --selftest
+
     - name: Package Release
       run: |
         mkdir -p package/LucidGrasp
@@ -86,6 +91,13 @@ jobs:
         cmake .. -G "NMake Makefiles" -DCMAKE_BUILD_TYPE=Release -DOpenCV_DIR="$env:OpenCV_DIR"
         nmake
 
+    - name: Self Test
+      shell: pwsh
+      run: |
+        $env:QT_QPA_PLATFORM = "offscreen"
+        .\build\LucidGrasp.exe --selftest
+        if ($LASTEXITCODE -ne 0) { throw "Self-test failed" }
+
     - name: Bundle Dependencies
       shell: pwsh
       run: |
@@ -111,7 +123,20 @@ jobs:
     - name: Compile Windows Installer
       shell: pwsh
       run: |
+        # Read the version out of the CMake cache rather than keeping a third
+        # copy of it: it is already in project(... VERSION ...) and already
+        # compiled into the binary, so this makes the installer agree with both
+        # instead of drifting from whichever one someone remembers to bump.
+        $cache = Get-Content build\CMakeCache.txt
+        $match = $cache | Select-String '^PROJECT_VERSION:STATIC=(.+)$'
+        if (-not $match) { throw "PROJECT_VERSION not found in CMakeCache.txt" }
+        $version = $match.Matches[0].Groups[1].Value
+        echo "Installer version: $version"
+        (Get-Content installer.iss -Raw) `
+          -replace '(?m)^AppVersion=.*$', "AppVersion=$version" `
+          | Set-Content installer.iss -NoNewline
         & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
+        if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
 
     - name: Upload Release Asset
       uses: softprops/action-gh-release@v2

@@ -1,6 +1,10 @@
 [Setup]
 AppName=LucidGrasp
-AppVersion=1.1.0
+; Kept in step with CMakeLists by the release workflow, which rewrites this line
+; from the CMake cache before compiling. This value only decides what Add/Remove
+; Programs displays, so it cannot affect the update check -- that compares the
+; compiled-in version against the release tag -- but it should still not lie.
+AppVersion=1.2.0
 DefaultDirName={autopf}\LucidGrasp
 DefaultGroupName=LucidGrasp
 OutputBaseFilename=LucidGrasp_Setup_x64

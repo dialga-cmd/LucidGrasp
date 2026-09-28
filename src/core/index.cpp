@@ -1,6 +1,8 @@
 #include "core/index.h"
 
 #include <algorithm>
+#include <cstdint>
+#include <iterator>
 
 #include <QDataStream>
 #include <QCryptographicHash>
@@ -19,7 +21,11 @@ namespace core {
 namespace {
 
 constexpr quint32 kMagic = 0x494D5349; // "IMSI"
-constexpr quint32 kVersion = 1;
+// v2 adds the source file's size and mtime, so a search can tell that an
+// indexed file has changed and refresh its features instead of comparing a
+// query against hashes for pixels that are no longer there. v1 caches are
+// rejected and rebuilt rather than silently trusted.
+constexpr quint32 kVersion = 2;
 
 // Guards against pathological nesting in a whole-filesystem scan.
 constexpr int kMaxScanDepth = 64;
@@ -87,8 +93,14 @@ bool collectImages(const QString &startDir, QStringList &out,
                                 QDir::Name);
     for (const QFileInfo &fi : entries) {
       if (fi.isDir()) {
-        if (ImageIndex::isSkippedSystemDir(fi.fileName()))
-          continue;
+        // The leaf name is only a cheap pre-filter; the resolved path is what
+        // decides. Matching on the name alone silently swallowed any user
+        // folder that happened to be called "dev", "sys", or "run", and those
+        // losses were invisible because they never reached the error counter.
+        if (systemDirNames().contains(fi.fileName()) &&
+            isSystemPath(fi.canonicalFilePath())) {
+          continue; // kernel or device pseudo-filesystem
+        }
         const QString path = fi.absoluteFilePath();
         if (fi.isSymLink()) {
           const QString canonical = fi.canonicalFilePath();
@@ -114,11 +126,6 @@ bool collectImages(const QString &startDir, QStringList &out,
 }
 
 } // namespace
-
-bool ImageIndex::isSkippedSystemDir(const QString &dirName)
-{
-  return systemDirNames().contains(dirName);
-}
 
 QString defaultIndexPath(const QString &rootDir) {
   // Built from the generic data location rather than AppDataLocation, which
@@ -253,7 +260,8 @@ bool ImageIndex::save(const QString &filePath) const {
       << quint32(entries_.size());
   for (const IndexEntry &e : entries_) {
     out << e.relPath << quint64(e.features.fileHash)
-        << quint64(e.features.phash) << quint64(e.features.dhash);
+        << quint64(e.features.phash) << quint64(e.features.dhash)
+        << qint64(e.features.size) << qint64(e.features.mtimeMs);
     out.writeRawData(reinterpret_cast<const char *>(e.features.hist.data()),
                      kHistBins);
   }
@@ -273,25 +281,36 @@ bool ImageIndex::load(const QString &filePath) {
   quint32 magic = 0, version = 0, count = 0;
   qint32 errors = 0;
   in >> magic >> version >> root_ >> errors >> count;
-  if (in.status() != QDataStream::Ok || magic != kMagic || version != kVersion)
+  // Clear on every failure path: root_ has already been overwritten by the
+  // stream above, and leaving it set against an empty entry list breaks the
+  // class invariant that a root only describes a populated index.
+  if (in.status() != QDataStream::Ok || magic != kMagic || version != kVersion) {
+    clear();
     return false;
+  }
 
-  // Each entry needs at least a path, three hashes, and the histogram, so a
-  // file claiming more entries than it could physically hold is corrupt.
-  // Resizing to an unchecked count would attempt an enormous allocation.
+  // Each entry needs at least a path, three hashes, two timestamps, and the
+  // histogram, so a file claiming more entries than it could physically hold is
+  // corrupt. Resizing to an unchecked count would attempt an enormous
+  // allocation.
   constexpr qint64 kMinBytesPerEntry =
-      2 * sizeof(quint64) + 3 * sizeof(quint64) + kHistBins;
-  if (qint64(count) * kMinBytesPerEntry > f.size())
+      2 * sizeof(quint64) + 3 * sizeof(quint64) + 2 * sizeof(qint64) + kHistBins;
+  if (qint64(count) * kMinBytesPerEntry > f.size()) {
+    clear();
     return false;
+  }
 
   entries_.resize(count);
   errors_ = errors;
   for (IndexEntry &e : entries_) {
     quint64 fh = 0, ph = 0, dh = 0;
-    in >> e.relPath >> fh >> ph >> dh;
+    qint64 size = -1, mtimeMs = 0;
+    in >> e.relPath >> fh >> ph >> dh >> size >> mtimeMs;
     e.features.fileHash = fh;
     e.features.phash = ph;
     e.features.dhash = dh;
+    e.features.size = size;
+    e.features.mtimeMs = mtimeMs;
     if (in.readRawData(reinterpret_cast<char *>(e.features.hist.data()),
                        kHistBins) != kHistBins) {
       clear();
@@ -320,16 +339,42 @@ std::vector<SearchResult> ImageIndex::search(const Features &query,
     uint32_t entry = 0;
     bool exact = false;
   };
-  std::vector<Candidate> ranked;
+
+  // Byte-identical copies are always retained, whatever the prefilter says, so
+  // they are collected separately and never compete for a shortlist slot.
+  std::vector<Candidate> exactHits;
+  std::vector<Candidate> pool;
   // OpenCV contributes 0.8, prefilter 0.2. So max possible score is 0.8 + 0.2 * prefilter.
   // We only keep candidates where max possible score >= threshold.
   for (size_t i = 0; i < entries_.size(); ++i) {
-    bool exact = isExactMatch(query, entries_[i].features);
-    double p = prefilterScore(query, entries_[i].features);
-    if (exact || (0.8 + 0.2 * p >= threshold)) {
-      ranked.push_back({p, uint32_t(i), exact});
+    const bool exact = isExactMatch(query, entries_[i].features);
+    const double p = prefilterScore(query, entries_[i].features);
+    if (exact) {
+      exactHits.push_back({p, uint32_t(i), true});
+    } else if (0.8 + 0.2 * p >= threshold) {
+      pool.push_back({p, uint32_t(i), false});
     }
   }
+
+  // Keep only the strongest kMinShortlist. This is the step that makes the
+  // architecture work: without a cap the relaxed bound above is satisfied by
+  // every entry for any threshold at or below 0.8, so the entire library would
+  // be decoded and scored. nth_element picks the top slice without paying for a
+  // full sort, which matters when the index holds a whole filesystem.
+  const auto stronger = [](const Candidate &a, const Candidate &b) {
+    return a.prefilter > b.prefilter;
+  };
+  if (pool.size() > kMinShortlist) {
+    std::nth_element(pool.begin(), pool.begin() + kMinShortlist, pool.end(),
+                     stronger);
+    pool.resize(kMinShortlist);
+  }
+  std::sort(pool.begin(), pool.end(), stronger);
+
+  std::vector<Candidate> ranked = std::move(exactHits);
+  ranked.insert(ranked.end(),
+                std::make_move_iterator(pool.begin()),
+                std::make_move_iterator(pool.end()));
 
   // --- Stage 2: OpenCV re-score of the shortlist -------------------
   CvMatcher matcher;
@@ -357,11 +402,29 @@ std::vector<SearchResult> ImageIndex::search(const Features &query,
     r.absPath = root.absoluteFilePath(e.relPath);
     r.exact = ranked[k].exact;
 
-    const CvMatcher::Prepared preparedCandidate = matcher.prepare(QImage(r.absPath));
-    r.score = 0.8 * matcher.match(preparedQuery, preparedCandidate) +
-              0.2 * ranked[k].prefilter;
+    // If the file changed since it was indexed, the stored hashes no longer
+    // describe it, so the prefilter term would be scored against pixels that
+    // are not there. Refresh it. This is the same work indexing does, and it
+    // only happens for files that moved under a stale cache.
+    double prefilter = ranked[k].prefilter;
+    bool exact = ranked[k].exact;
+    if (isStale(e.features, r.absPath)) {
+      Features fresh;
+      if (extractFeatures(r.absPath, fresh)) {
+        prefilter = prefilterScore(query, fresh);
+        exact = isExactMatch(query, fresh);
+        r.exact = exact;
+      }
+    }
 
-    if (r.exact || r.score >= threshold) {
+    // Decoded straight to a small size rather than at full resolution, which
+    // matters because the shortlist is decoded once per query.
+    const CvMatcher::Prepared preparedCandidate = matcher.prepare(
+        loadScaled(r.absPath, 512));
+    r.score = 0.8 * matcher.match(preparedQuery, preparedCandidate) +
+              0.2 * prefilter;
+
+    if (exact || r.score >= threshold) {
       results.push_back(std::move(r));
     }
     ++done;
@@ -384,7 +447,10 @@ bool ImageIndex::searchFile(const QString &queryPath, double threshold,
   Features feat;
   if (!extractFeatures(queryPath, feat))
     return false;
-  out = search(feat, QImage(queryPath), threshold, std::move(progress));
+  // Routed through loadScaled for the same reason as the candidates: it keeps
+  // the query and the index on one resolution, which is what the histogram
+  // comparison assumes, and it applies EXIF orientation to both sides.
+  out = search(feat, loadScaled(queryPath, 512), threshold, std::move(progress));
   return true;
 }
 

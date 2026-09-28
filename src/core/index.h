@@ -42,9 +42,12 @@ public:
   bool load(const QString &filePath);
 
   // Two-stage search. Every entry is ranked in memory from its stored hashes,
-  // then only the shortlist is decoded and re-scored with OpenCV. This keeps
-  // per-query cost proportional to the shortlist rather than to the size of
-  // the library, which is what makes whole-filesystem indexes usable.
+  // then only the shortlist is decoded and re-scored with OpenCV. The cap is
+  // what keeps per-query cost proportional to the shortlist rather than to the
+  // size of the library, which is what makes whole-filesystem indexes usable.
+  // Byte-identical copies are always kept, whatever they score on the prefilter.
+  static constexpr size_t kMinShortlist = 256;
+
   std::vector<SearchResult> search(const Features &query, const QImage &queryImage,
                                    double threshold,
                                    SearchProgressFn progress = {}) const;
@@ -57,11 +60,6 @@ public:
   bool empty() const { return entries_.empty(); }
   size_t size() const { return entries_.size(); }
   void clear();
-
-  // Directory names skipped during a recursive scan. Mounting a whole
-  // filesystem otherwise walks kernel and device pseudo-filesystems, which are
-  // unreadable, enormous, and contain no photographs.
-  static bool isSkippedSystemDir(const QString &dirName);
 
 private:
   QString root_;

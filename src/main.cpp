@@ -140,7 +140,10 @@ int main(int argc, char* argv[])
     QCoreApplication::setOrganizationName(QStringLiteral("LucidGrasp"));
     QCoreApplication::setOrganizationDomain(QStringLiteral("lucidgrasp.local"));
     QCoreApplication::setApplicationName(QStringLiteral("LucidGrasp"));
-    QCoreApplication::setApplicationVersion(QStringLiteral("1.1.0"));
+    // Supplied by CMake from project(... VERSION ...). Do not hardcode a copy
+    // here: the update checker compares this string against the release tag,
+    // so a stale literal means every user is told to update forever.
+    QCoreApplication::setApplicationVersion(QStringLiteral(LUCIDGRASP_VERSION));
 
     QStringList args;
     for (int i = 0; i < argc; ++i)
@@ -162,7 +165,14 @@ int main(int argc, char* argv[])
         return runCli(args);
     }
 
-    QApplication::setAttribute(Qt::AA_DontUseNativeDialogs); // force Qt widget dialog (GTK3 native rejects files)
+#if defined(Q_OS_LINUX)
+    // Scoped to Linux on purpose. GTK3's native file dialog rejects files, so
+    // Qt's own is used there. This used to be a global attribute, which also
+    // suppressed the platform dialog on Windows and macOS -- the one place the
+    // OS can legitimately own how a file picker looks, and the reason the OS
+    // palette was not reaching it on those two platforms.
+    QApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
+#endif
     QApplication app(argc, argv);
     MainWindow window;
     window.resize(1100, 700);

@@ -32,6 +32,26 @@ The developer wanted LucidGrasp to feel like a real installed application, not j
 
 The developer then requested Windows support. The AI assistant rewrote the GitHub Actions workflow to include a separate Windows build job that compiles the project with MSVC, bundles all Qt6 and OpenCV DLLs using windeployqt, and packages everything into a self contained zip file. The CMakeLists.txt was updated to handle both platforms: embedding the icon via a Windows resource file on MSVC, and using platform appropriate compiler flags.
 
+### 1.1 Whole Filesystem Scanning
+
+Symlinked directories became traversable, which is what makes a scan of `/` viable at all, and the kernel and device pseudo-filesystems were excluded. The full account is under Indexing.
+
+### 1.2.0 Update Checking, Native Dialogs, and OS Colours
+
+This release is three things: a new feature, a correctness sweep through the search path, and the removal of hand-picked colours from the interface.
+
+**The update checker is new.** `src/app/update_checker.{h,cpp}` asks GitHub for the latest published release, compares its tag against the running version, and raises a dismissible notice. It notifies only; it never downloads or installs. The three hard constraints behind its design are written up under Update Checking: GitHub's rate limit is per IP rather than per user, so the throttle is on attempts rather than successes; every failure resolves to silence; and an unreadable version tag resolves to silence too, because the only way to be wrong in that direction is to tell every user to update on every launch with no way to tell the answer is wrong.
+
+**The shortlist cap was not actually present in 1.1.** Stage one collected every entry that passed the relaxed bound and stage two decoded and scored all of them, so the two-stage design did no work. See Two-Stage Search for why the cap is the only thing that makes it work. Alongside it: byte-identical copies are now collected separately and never compete for a shortlist slot; candidates and queries are both decoded through `loadScaled`, which shrinks on the way in and applies EXIF orientation, instead of being decoded at full resolution and then resized; and an entry whose file has changed since indexing has its features refreshed before it is scored, instead of being compared against hashes for pixels that are no longer there.
+
+**Five further fixes**, each of which was a silent wrong answer rather than a crash: system directories are matched on resolved path rather than on leaf name, so a user folder called `dev` or `run` is no longer silently dropped and those losses never reached the error counter; `load` leaves `root_` set against an empty index on two of its failure paths, breaking the invariant that a root only ever describes a populated index; the cache format moved to version 2, carrying the file size and mtime that make the staleness check above possible, and version 1 caches are rebuilt rather than trusted; both worker threads now have exception barriers, because an exception crossing a `std::thread` calls `terminate` and OpenCV throws on malformed input, which is precisely what a whole-filesystem scan of untrusted files produces; and images were decoded at full resolution and then copied into an OpenCV matrix before being squeezed down to the 256 px the comparison actually reads.
+
+**Every colour now comes from the operating system.** All eighteen style tokens are derived from `QPalette`; no hex value is chosen by hand. Roles the palette has no equivalent for are derived from it rather than guessed. See Appearance.
+
+**The file pickers were not using the platform dialog after all.** `Qt::AA_DontUseNativeDialogs` was set as a global application attribute to work around a GTK3 bug, which meant the platform picker was suppressed on Windows and macOS as well — the one place the OS can legitimately own how a dialog looks. It is now scoped to Linux, which is the only platform with the bug.
+
+**The version string had three independent copies** — `CMakeLists.txt`, `main.cpp` and `installer.iss` — which is the exact drift that makes an update checker report a phantom update forever. There is now one source.
+
 ## Current Architecture
 
 ### Build System
@@ -39,6 +59,7 @@ The developer then requested Windows support. The AI assistant rewrote the GitHu
 The project uses CMake (minimum version 3.16) with C++17. Three external libraries are required:
 
     Qt6 Widgets for the graphical interface
+    Qt6 Network for the update check (ships in qt6-base-dev; windeployqt bundles the DLL)
     OpenCV for computer vision and pixel analysis
     pthreads for background indexing (Linux only, Windows uses native threads)
 
@@ -54,7 +75,9 @@ The CMakeLists.txt includes platform specific sections. On Windows, it appends a
 
     src/core/index.h and index.cpp manage the index data structure, serialization to disk, and the search loop that iterates over all indexed entries comparing them against a query image.
 
-    src/ui/mainwindow.h and mainwindow.cpp implement the Qt6 graphical interface including the library browser, query image selector, threshold control, progress bar, and results grid.
+    src/ui/mainwindow.h and mainwindow.cpp implement the Qt6 graphical interface including the library browser, query image selector, threshold control, progress bar, results grid, theme derivation, menu bar, and the update notice.
+
+    src/app/update_checker.h and update_checker.cpp hold the release check and everything it needs to be testable without a network: version comparison and payload parsing are free functions, the preferences sit behind a small class over `QSettings`, and only the class that owns the `QNetworkAccessManager` touches the network.
 
 ### How the Matching Engine Works
 
@@ -90,7 +113,9 @@ In 1.0 the search loop decoded every indexed image and ran the full OpenCV compa
 
 Search is now split into two stages.
 
-Stage one ranks every entry in memory using only the hashes already stored in the index, via `prefilterScore`. This touches no files and costs microseconds per entry, so it scales to whole-filesystem indexes. The top `kMinShortlist` entries (256) or `topK * kShortlistFactor`, whichever is larger, are kept. Byte-identical copies are always retained regardless of their prefilter score.
+Stage one ranks every entry in memory using only the hashes already stored in the index, via `prefilterScore`. This touches no files and costs microseconds per entry, so it scales to whole-filesystem indexes. The top `kMinShortlist` entries (256) are kept, selected with `nth_element` so a whole-filesystem index does not pay for a full sort. Byte-identical copies are always retained regardless of their prefilter score, and are kept in a separate list so they never compete for a shortlist slot.
+
+The cap is load-bearing, not an optimisation. The relaxed stage-one bound is `0.8 + 0.2 * prefilter >= threshold`, and since a prefilter score lies in [0, 1] the left side is bounded to [0.8, 1.0]. For any threshold at or below 0.8 — which is the entire 0-80% range of the default UI slider — that test is unconditionally true, so without the cap the whole library would be decoded and scored and the two-stage design would do no work at all.
 
 Stage two decodes and re-scores only that shortlist with the full OpenCV comparison. Candidate images are decoded one at a time and released immediately, so peak memory stays flat regardless of library size.
 
@@ -108,6 +133,30 @@ Per-query cost is now bounded by the shortlist rather than the library, so it no
 ### Threshold Control
 
 The user interface includes a spinbox labeled "Threshold (%)" that defaults to 50. During the results display phase, any image whose similarity score falls below this threshold is filtered out and not shown. The user can adjust this value before running a search to control how strict the matching should be.
+
+### Appearance
+
+The window keeps one fixed layout and draws it in whichever colours the desktop reports. Every colour comes from `QPalette`; none is hand-picked, so the app follows the system's accent and surfaces. A square icon button in the top right switches between the two schemes, and the initial scheme is read from the desktop at startup. In the scheme the desktop is actually using, its palette is applied as reported. The other scheme has to be constructed, because Qt 6.4 can neither report nor hold a palette for a scheme that is not current: lightness is inverted with hue and saturation carried through, which keeps the desktop's accent recognisable instead of substituting a guess for it.
+
+The palette is captured once at startup and never re-read from the application. `applyTheme` installs the derived theme as the application palette so that dialogs inherit it, so re-reading `QGuiApplication::palette()` would hand back the app's own output and make each toggle a derivation of the previous one — the colours walk away from the desktop's and never return.
+
+Roles with no direct equivalent in the palette are derived from it rather than chosen: the muted text is the placeholder role when a style actually supplies one and otherwise the text colour washed as far toward the background as the body-text ratio allows; the hover and pressed states step the surface they sit on toward the text colour, which darkens in a light scheme and lightens in a dark one; and the primary button's label is chosen per state. That last one is not a nicety. Pressing a button darkens the accent, which walks it across the luminance at which a readable label has to flip between black and white, and Qt's own accent sits on that crossover — white reads 3.7:1 on it at rest, black 3.6:1 when pressed, so no single label clears 4.5:1 across all three states.
+
+File pickers deliberately stay on the platform's own dialog wherever one exists, so they carry the desktop's real colours along with its previews, bookmarks and shell integration. The theme is pushed onto the dialog instance regardless, which costs nothing when a native dialog is used and covers the case where none is available: Qt then falls back to its own built-in picker, a top-level window that inherits neither the window's stylesheet nor its palette, and which otherwise renders as a white dialog carrying near-white text.
+
+The GTK3 native picker rejects files, so `Qt::AA_DontUseNativeDialogs` is set on Linux to work around it. That attribute is a global one, and setting it unconditionally also suppressed the platform dialog on Windows and macOS, which defeated the point of leaving the pickers alone. It is now scoped to Linux, which is the only platform with the bug.
+
+### Update Checking
+
+`src/app/update_checker.{h,cpp}` asks GitHub for the latest published release and compares its tag against the running version. It notifies and opens the release page; it does not download or install anything. Self-updating is not viable on Linux, where the release is a tarball of a binary that may be sitting in `/usr/bin` owned by root, and the Windows equivalent would mean a 150 MB download and replacing a running executable under an installer that needs administrator rights.
+
+The comparison is deliberately strict, and every failure resolves to silence. An unreadable tag on either side returns "not newer", because the only way to be wrong in that direction is to tell every user to update, on every launch, with no way to tell that the answer is wrong. Rejecting a leading zero in any version component is a real semver rule, and it is the one that matters here: a date-based tag such as `v2024.01.15` would otherwise parse as version 2024.1.15 and permanently outrank 1.1.0.
+
+GitHub's unauthenticated API allows 60 requests per hour per IP address, and an IP is shared by everyone behind one NAT or carrier-grade NAT, so a single exhausted office budget silences every machine in it. The attempt is therefore recorded whatever its outcome, and the daily throttle is on attempts rather than successes: an unreachable or rate-limited GitHub costs one try a day instead of one per launch. A failure on the automatic schedule produces no output at all, because there is nothing the user can do about it and a daily complaint nobody can act on only teaches people to ignore the status bar. A failure on a manual check is reported, because that check was asked for.
+
+Preferences live in `QSettings` under `updates/`: `disabled`, `ignoredVersion` and `lastCheck`. The dialog offers three buttons — open the download page, not now, and never check again — and the last of those sets `disabled` permanently. A permanent opt-out is a one-way door, so the menu bar carries a checkable "Check for Updates Automatically" that reverses it, and a "Check for Updates…" action that bypasses the throttle. The mute is per-version rather than a blanket switch for the same reason: someone who has ignored 1.2.0 should still hear about 1.3.0, which is the release most likely to be the one they want.
+
+The version compared against the tag comes from `project(LucidGrasp VERSION ...)`, which hands it to `main.cpp` as `LUCIDGRASP_VERSION`. It used to be a second literal in `main.cpp` and a third in `installer.iss`, which is exactly the drift that turns an update checker into a permanent false alarm; the installer version is now read out of the CMake cache by the release workflow. The repository the checker polls is `LUCIDGRASP_REPO`, a CMake cache variable so a fork can point it elsewhere.
 
 ### Indexing
 
@@ -129,6 +178,10 @@ Indexing runs on a background thread and reports progress back to the UI through
 
 Search also runs on a background thread, with progress reporting and a working Stop button, and the UI stays responsive throughout. While a search is in flight the inputs that would invalidate the in-memory index are disabled, since the worker reads the index directly rather than working on a copy.
 
+### A Note on the Performance Table
+
+The table under Two-Stage Search was written in 1.1 and attributes the shortlist cap to that release. The cap was not in fact present in the 1.1 binary, so those figures describe the intended design rather than a measurement of the shipped 1.1 build, and 1.2 has not been re-measured against 1.0 either. Treat the 1.0 column as the only verified figure until someone repeats the measurement on both binaries.
+
 ## Release Pipeline
 
 The project uses GitHub Actions to automatically build and package releases for both Linux and Windows whenever a new release is published on GitHub.
@@ -139,13 +192,17 @@ The Linux job runs on ubuntu-latest. It installs Qt6, OpenCV, and g++ through ap
 
 ### Windows Build
 
-The Windows job runs on windows-latest. It installs Qt6 using the jurplel/install-qt-action GitHub Action, downloads the official OpenCV pre built Windows binaries, sets up MSVC through ilammy/msvc-dev-cmd, and builds the project with NMake. After compilation, it runs windeployqt to automatically copy all required Qt DLLs, plugins, and platform files into the output directory, and then copies the OpenCV world DLL alongside the executable. The bundled folder is then compiled into a Windows installer with Inno Setup 6 from installer.iss, producing LucidGrasp_Setup_x64.exe. Windows users run the installer and get a start menu and optional desktop shortcut with zero additional setup.
+The Windows job runs on windows-latest. It installs Qt6 using the jurplel/install-qt-action GitHub Action, downloads the official OpenCV pre built Windows binaries, sets up MSVC through ilammy/msvc-dev-cmd, and builds the project with NMake. After compilation, it runs windeployqt to automatically copy all required Qt DLLs, plugins, and platform files into the output directory, and then copies the OpenCV world DLL alongside the executable. The bundled folder is then compiled into a Windows installer with Inno Setup 6 from installer.iss, producing LucidGrasp_Setup_x64.exe. Windows users run the installer and get a start menu and optional desktop shortcut with zero additional setup. The `AppVersion` in installer.iss is rewritten from the CMake cache before the installer is compiled, so all three places that carry the version — CMake, the binary, and the installer's entry in Add/Remove Programs — are the same number.
+
+The update checker added a dependency on `Qt6::Network`, which needs no change to either job: `qt6-base-dev` already ships it on the Linux side, and windeployqt copies `Qt6Network.dll` along with everything else on the Windows side.
 
 ## Testing Results
 
 The indexing system has been tested and confirmed to work correctly on directories containing over 400 images. It processes all supported formats without crashing and produces accurate cached index files that can be reloaded on subsequent runs.
 
 The matching engine has been tested with both raw and edited versions of photographs. Tests included an abandoned building photograph with a heavy teal/cyan color grade applied, and a portrait photograph with shadow crushing and color tone adjustments. In both cases, the edited version was correctly identified as a match. The portrait test returned 100% for the edited image and 50% for the raw version against a directory of 10 mixed images.
+
+`--selftest` runs eight cases with no network access at all, in CI on both platforms, so the update checker's behaviour is verified without spending anyone's rate limit: version comparison across 22 valid and malformed tag pairs, all of which have to resolve to silence when they are unreadable; parsing of one real-shaped payload and ten malformed ones, which must be refused without writing to the output; and a round trip of the opt-out, the per-version mute, and the daily throttle against a scratch settings directory. The live endpoint was exercised separately against the real API at three reported versions — current, older, and newer than any release — and the last of those produced no notice, which is the case that would otherwise have gone unnoticed.
 
 ## Known Issues
 
