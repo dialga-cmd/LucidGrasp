@@ -196,6 +196,16 @@ The Windows job runs on windows-latest. It installs Qt6 using the jurplel/instal
 
 The update checker added a dependency on `Qt6::Network`, which needs no change to either job: `qt6-base-dev` already ships it on the Linux side, and windeployqt copies `Qt6Network.dll` along with everything else on the Windows side.
 
+Three things about the Windows job are non-obvious, and all three have broken it at least once. They are recorded here because each one fails in a way that points away from itself.
+
+**The self test cannot run before the bundling step without help.** The self test step comes before the step that runs windeployqt and copies the OpenCV world DLL, so at that point the build directory contains nothing but the executable. Qt's own DLLs resolve because install-qt-action puts Qt's `bin` directory on `PATH`; OpenCV's do not, because OpenCV was installed to a prefix of its own. The Windows loader therefore cannot start the process, and the step fails with *no output at all* and a bare `Self-test failed` — which reads as a failing test rather than a process that never ran. The step now prepends OpenCV's `bin` directory to `PATH` and prints the numeric exit code, so that a loader failure reports `-1073741515` (`STATUS_DLL_NOT_FOUND`) and is distinguishable from a test that ran and failed. Linux never sees this, because OpenCV is a system library there and is always on the default search path.
+
+**The version lives in the cache under `CMAKE_PROJECT_VERSION`, not `PROJECT_VERSION`.** `project(... VERSION ...)` sets `PROJECT_VERSION` as an ordinary variable, which CMake never writes to the cache; the cache entry is `CMAKE_PROJECT_VERSION:STATIC`. A grep for the bare name therefore finds nothing, and the installer step throws after every other step has already passed. When reading it fails, the step prints the `VERSION` entries that *are* present.
+
+**`Get-Content -Raw` keeps the CRLF, and `.` matches `\r`.** The `AppVersion` rewrite runs against the raw file, so `-replace '(?m)^AppVersion=.*$'` does not stop at the line ending: a greedy `.*` consumes up to but not including the `\n`, which leaves the carriage return attached to the replaced text. The pattern is now `[^\r\n]*`. This one is worth remembering because it fails silently — the replacement still looks correct in isolation, and the damage only appears as a merged line further down the installer script.
+
+A fourth, smaller one: `QGuiApplication` only forward-declares `QStyleHints`, so `QGuiApplication::styleHints()->colorScheme()` is a member call on an incomplete type unless `<QStyleHints>` is included. MSVC reports this as two `C2678` errors on the *comparison* lines, complaining that the left operand is an `int`, because `auto` had nothing to deduce from and fell back to one. The real error is `C2027` on the line above. This only appears on the Windows job, because only that job builds against Qt 6.5, and `colorScheme()` is the only call in the codebase gated to 6.5 or newer.
+
 ## Testing Results
 
 The indexing system has been tested and confirmed to work correctly on directories containing over 400 images. It processes all supported formats without crashing and produces accurate cached index files that can be reloaded on subsequent runs.
