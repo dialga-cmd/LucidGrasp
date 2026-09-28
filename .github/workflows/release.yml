@@ -75,6 +75,10 @@ jobs:
         Invoke-WebRequest -Uri $url -OutFile opencv-installer.exe
         Start-Process -FilePath .\opencv-installer.exe -ArgumentList "-o`"C:\opencv`" -y" -Wait
         echo "OpenCV_DIR=C:\opencv\opencv\build" >> $env:GITHUB_ENV
+        # Single definition of where the runtime DLLs live, shared by the self
+        # test (which needs them on PATH) and the bundling step (which copies
+        # them next to the exe). They used to be written out twice.
+        echo "OpenCV_BIN=C:\opencv\opencv\build\x64\vc16\bin" >> $env:GITHUB_ENV
 
     - name: Setup MSVC
       uses: ilammy/msvc-dev-cmd@v1
@@ -95,8 +99,17 @@ jobs:
       shell: pwsh
       run: |
         $env:QT_QPA_PLATFORM = "offscreen"
+        # OpenCV's DLLs sit in their own bin directory and are not on PATH, and
+        # nothing has copied them next to the exe yet -- that happens in the
+        # bundling step below. Without this the loader cannot start the process
+        # at all, so the step fails with no output and no clue as to why.
+        $env:PATH = "$env:OpenCV_BIN;$env:PATH"
         .\build\LucidGrasp.exe --selftest
-        if ($LASTEXITCODE -ne 0) { throw "Self-test failed" }
+        if ($LASTEXITCODE -ne 0) {
+          # -1073741515 is STATUS_DLL_NOT_FOUND, i.e. the process never ran, as
+          # opposed to a test having run and failed.
+          throw "Self-test failed (exit code $LASTEXITCODE)"
+        }
 
     - name: Bundle Dependencies
       shell: pwsh
@@ -112,8 +125,7 @@ jobs:
         windeployqt --release --no-translations --no-system-d3d-compiler --no-opengl-sw $dest\LucidGrasp.exe
 
         # Copy the OpenCV world DLL
-        $opencvBin = "$env:OpenCV_DIR\x64\vc16\bin"
-        Copy-Item "$opencvBin\opencv_world*.dll" $dest\
+        Copy-Item "$env:OpenCV_BIN\opencv_world*.dll" $dest\
 
     - name: Install Inno Setup
       shell: pwsh

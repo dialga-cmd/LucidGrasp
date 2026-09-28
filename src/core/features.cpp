@@ -228,7 +228,9 @@ bool extractFeatures(const QString& path, Features& out)
 double hammingSimilarity(uint64_t a, uint64_t b)
 {
     const uint64_t x = a ^ b;
-    const int dist = std::bitset<64>(x).count();
+    // count() returns size_t; the value is bounded by the bit width, so the
+    // narrowing is exact. MSVC still warns without the cast (C4267).
+    const int dist = static_cast<int>(std::bitset<64>(x).count());
     return 1.0 - double(dist) / 64.0;
 }
 
