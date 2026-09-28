@@ -31,6 +31,10 @@
 #include <QShowEvent>
 #include <QSpinBox>
 #include <QStatusBar>
+// QGuiApplication forward-declares QStyleHints, so styleHints()->anything()
+// is a call on an incomplete type unless this is included. The class has
+// existed since Qt 5; only colorScheme() on it is version gated.
+#include <QStyleHints>
 #include <QTimer>
 #include <QUrl>
 #include <QVBoxLayout>
@@ -958,16 +962,17 @@ void MainWindow::updateActions() {
 // ----- theme ---------------------------------------------------------------
 
 bool MainWindow::systemPrefersDark() const {
-  // QStyleHints::colorScheme() is the correct answer, but it only exists
-  // from Qt 6.5. The luminance check below works on every Qt 6 and agrees
-  // with it on the platforms that report a scheme at all, so the version
-  // guard is belt and braces rather than the primary mechanism.
+  // QStyleHints::colorScheme() is the correct answer, but it only exists from
+  // Qt 6.5. The luminance check below works on every Qt 6 and agrees with it on
+  // the platforms that report a scheme at all, so the version guard is belt and
+  // braces rather than the primary mechanism.
 #if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
-  const auto scheme = QGuiApplication::styleHints()->colorScheme();
+  const Qt::ColorScheme scheme = QGuiApplication::styleHints()->colorScheme();
   if (scheme == Qt::ColorScheme::Dark)
     return true;
   if (scheme == Qt::ColorScheme::Light)
     return false;
+  // Unknown, or a Qt too old to answer, falls through to the luminance check.
 #endif
   return relativeLuminance(desktopPalette_.color(QPalette::Window)) <
          relativeLuminance(desktopPalette_.color(QPalette::WindowText));
