@@ -35,9 +35,30 @@ constexpr int kDiscoveryReportInterval = 256;
 
 const QSet<QString> &systemDirNames()
 {
+  // Names are lower-case on every platform; the resolve-path check in
+  // isSystemPath() is the authority, the prefilter is just a cheap "maybe".
   static const QSet<QString> names = {
+#ifdef Q_OS_WIN
+      // Windows mounts no kernel pseudo-filesystem under a drive letter, but a
+      // whole-drive scan of C:\ would walk hours of OS internals and junctions
+      // (DriverStore, System32, ...) for essentially no indexable images.
+      // These names are only skipped when the resolved path puts them directly
+      // under a drive root, so an unrelated user folder further down the tree
+      // that happens to share a name is never touched.
+      QStringLiteral("windows"),
+      QStringLiteral("program files"),
+      QStringLiteral("program files (x86)"),
+      QStringLiteral("programdata"),
+      QStringLiteral("system volume information"),
+      QStringLiteral("$recycle.bin"),
+      QStringLiteral("recovery"),
+      QStringLiteral("perflogs"),
+#else
+      // Kernel and device pseudo-filesystems: virtual, non-persistent, and
+      // either enormous or permission-hostile to walk.
       QStringLiteral("proc"), QStringLiteral("sys"),
       QStringLiteral("dev"),  QStringLiteral("run"),
+#endif
   };
   return names;
 }
@@ -46,12 +67,29 @@ bool isSystemPath(const QString &path)
 {
   if (path.isEmpty())
     return false;
+#ifdef Q_OS_WIN
+  // A drive-root system folder, e.g. "C:/Windows". The resolved path uses
+  // forward slashes; the drive letter may be either case.
+  const QString cleaned = QDir::fromNativeSeparators(path);
+  const int slash = cleaned.lastIndexOf(QLatin1Char('/'));
+  if (slash < 2)
+    return false;
+  const QString parent = cleaned.left(slash);
+  if (parent.size() != 2 || parent.at(1) != QLatin1Char(':'))
+    return false; // parent is not a drive root
+  const QString name = cleaned.mid(slash + 1);
+  for (const QString &n : systemDirNames())
+    if (name.compare(n, Qt::CaseInsensitive) == 0)
+      return true;
+  return false;
+#else
   for (const QString &name : systemDirNames()) {
     const QString prefix = QLatin1Char('/') + name;
     if (path == prefix || path.startsWith(prefix + QLatin1Char('/')))
       return true;
   }
   return false;
+#endif
 }
 
 // Absolute, symlink-resolved form of a library root. Falls back to the plain
@@ -97,7 +135,10 @@ bool collectImages(const QString &startDir, QStringList &out,
         // decides. Matching on the name alone silently swallowed any user
         // folder that happened to be called "dev", "sys", or "run", and those
         // losses were invisible because they never reached the error counter.
-        if (systemDirNames().contains(fi.fileName()) &&
+        // Lower-cased so the pre-filter matches on a case-insensitive file
+        // system; the authoritative isSystemPath() call below still requires
+        // the real path to be a system root, so this cannot over-match.
+        if (systemDirNames().contains(fi.fileName().toLower()) &&
             isSystemPath(fi.canonicalFilePath())) {
           continue; // kernel or device pseudo-filesystem
         }
@@ -347,6 +388,14 @@ std::vector<SearchResult> ImageIndex::search(const Features &query,
   // OpenCV contributes 0.8, prefilter 0.2. So max possible score is 0.8 + 0.2 * prefilter.
   // We only keep candidates where max possible score >= threshold.
   for (size_t i = 0; i < entries_.size(); ++i) {
+    // Stage one is pure in-memory arithmetic, but it still walks the entire
+    // index, so the cancellation callback is consulted here too (throttled:
+    // once per 8192 entries plus the final one). Without this, Stop is inert
+    // for the first pass over a six-figure whole-filesystem index.
+    if (progress &&
+        (i % 8192 == 0 || i + 1 == entries_.size()) &&
+        !progress(static_cast<int>(i), static_cast<int>(entries_.size())))
+      return {};
     const bool exact = isExactMatch(query, entries_[i].features);
     const double p = prefilterScore(query, entries_[i].features);
     if (exact) {
@@ -401,6 +450,14 @@ std::vector<SearchResult> ImageIndex::search(const Features &query,
     r.relPath = e.relPath;
     r.absPath = root.absoluteFilePath(e.relPath);
     r.exact = ranked[k].exact;
+
+    // File gone since indexing: nothing left to score. Without this check a
+    // deleted file kept its stale prefilter, decoded to null, and re-appeared
+    // as a ghost at ~0.2 * prefilter whenever the threshold was low enough.
+    if (!QFile::exists(r.absPath)) {
+      ++done;
+      continue;
+    }
 
     // If the file changed since it was indexed, the stored hashes no longer
     // describe it, so the prefilter term would be scored against pixels that

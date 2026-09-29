@@ -446,13 +446,18 @@ void MainWindow::buildMenus() {
   // convenience overloads because the receiver-taking form is deprecated in Qt 6.
   QMenu *file = bar->addMenu(tr("&File"));
 
-  QAction *indexAction = file->addAction(tr("&Index Library..."));
-  indexAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+I")));
-  connect(indexAction, &QAction::triggered, this, &MainWindow::browseLibrary);
+  // Kept as members because a search worker reads index_ directly and these two
+  // actions mutate it (browseLibrary -> tryLoadIndex replaces index_). Disabling
+  // only the buttons still left Ctrl+I live during a search, which freed the
+  // entry vector under the worker. They are gated alongside the buttons in
+  // updateActions(), so the keyboard path and the click path can never diverge.
+  indexAction_ = file->addAction(tr("Select &Library..."));
+  indexAction_->setShortcut(QKeySequence(QStringLiteral("Ctrl+I")));
+  connect(indexAction_, &QAction::triggered, this, &MainWindow::browseLibrary);
 
-  QAction *queryAction = file->addAction(tr("&Select Query Image..."));
-  queryAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Q")));
-  connect(queryAction, &QAction::triggered, this, &MainWindow::browseQuery);
+  queryAction_ = file->addAction(tr("Select &Query Image..."));
+  queryAction_->setShortcut(QKeySequence(QStringLiteral("Ctrl+Q")));
+  connect(queryAction_, &QAction::triggered, this, &MainWindow::browseQuery);
 
   file->addSeparator();
   QAction *quitAction = file->addAction(tr("E&xit"));
@@ -469,16 +474,16 @@ void MainWindow::buildMenus() {
   checkAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+U")));
   connect(checkAction, &QAction::triggered, this, [this] {
     updateCheckManual_ = true;
-    if (updates_)
-      updates_->checkNow();
+    // updates_ is constructed before the menus (see MainWindow()), so it is
+    // always live here; the guard used to imply it might not be.
+    updates_->checkNow();
   });
 
   autoUpdateAction_ = help->addAction(tr("Check for Updates &Automatically"));
   autoUpdateAction_->setCheckable(true);
   autoUpdateAction_->setChecked(!updates_->isDisabled());
   connect(autoUpdateAction_, &QAction::toggled, this, [this](bool on) {
-    if (updates_)
-      updates_->setDisabled(!on);
+    updates_->setDisabled(!on);
   });
 }
 
@@ -519,10 +524,9 @@ void MainWindow::showUpdateDialog(const QString &tag, const QString &url,
   });
   connect(later, &QAbstractButton::clicked, box, &QDialog::accept);
   connect(never, &QAbstractButton::clicked, box, [this, box] {
-    if (updates_)
-      updates_->setDisabled(true);
-    if (autoUpdateAction_)
-      autoUpdateAction_->setChecked(false);
+    // Same construction-order guarantee as the menu handlers above.
+    updates_->setDisabled(true);
+    autoUpdateAction_->setChecked(false);
     box->accept();
   });
   // Each button closes the box above, and closing it with the window X emits
@@ -535,6 +539,13 @@ void MainWindow::showUpdateDialog(const QString &tag, const QString &url,
 void MainWindow::onUpdateCheckFinished(app::CheckOutcome outcome) {
   // UpdateAvailable is already on screen as a dialog, and Suppressed means the
   // user has said what they want. Neither needs a status-bar line.
+  // The manual/automatic distinction applies to one check only, so the flag is
+  // consumed here on every outcome. Leaving it set when an update was found
+  // (or suppressed) leaked "manual" into the next automatic check, which then
+  // complained about an unreachable GitHub exactly like a asked-for check.
+  const bool wasManual = updateCheckManual_;
+  updateCheckManual_ = false;
+
   if (outcome != app::CheckOutcome::UpToDate &&
       outcome != app::CheckOutcome::Unreachable)
     return;
@@ -542,9 +553,8 @@ void MainWindow::onUpdateCheckFinished(app::CheckOutcome outcome) {
   // A failure on the automatic schedule says nothing. Corporate proxies that
   // inspect TLS break this check for whole offices, and a status-bar complaint
   // every day that nobody can act on only teaches people to ignore the bar.
-  if (!updateCheckManual_)
+  if (!wasManual)
     return;
-  updateCheckManual_ = false;
 
   if (outcome == app::CheckOutcome::UpToDate)
     statusBar()->showMessage(
@@ -589,6 +599,13 @@ QString MainWindow::askForFile(const QString &title,
 }
 
 void MainWindow::browseLibrary() {
+  // A search worker iterates index_; the picker below would lead straight to
+  // tryLoadIndex() replacing the vector underneath it. The button is gated in
+  // updateActions(), but the menu action shares this slot, so the guard has to
+  // live here rather than on the widget.
+  if (indexing_ || searching_)
+    return;
+
   const QString dir = askForDirectory(QStringLiteral("Select image library"));
   if (dir.isEmpty())
     return;
@@ -598,6 +615,12 @@ void MainWindow::browseLibrary() {
 }
 
 void MainWindow::tryLoadIndex(const QString &dir) {
+  // Same guard as browseLibrary(), at the mutation site: index_.clear() and
+  // index_.load() below rewrite the vector a search worker is reading. Cheap
+  // defence in depth for any future caller that forgets to check.
+  if (indexing_ || searching_)
+    return;
+
   results_->clear();
   // Fall back to the pre-1.1 cache location so existing installs keep
   // working; the next reindex writes to the new path.
@@ -688,7 +711,9 @@ void MainWindow::onIndexProgress(int done, int total, const QString &current) {
     return;
   }
   progress_->setRange(0, 100);
-  progress_->setValue(done * 100 / total);
+  // done * 100 in int overflows past ~21.4M files (a whole-disk archive can
+  // get close); evaluate in 64 bits, then narrow a value that is in range.
+  progress_->setValue(int(qint64(done) * 100 / total));
   stats_->setText(QStringLiteral("Indexing %1/%2\n%3")
                       .arg(done)
                       .arg(total)
@@ -746,6 +771,13 @@ void MainWindow::stopIndex() {
 }
 
 void MainWindow::browseQuery() {
+  // The picker opens a modal native dialog, which is wrong UX while a search
+  // or index is running, and replacing the query mid-search is at best
+  // confusing. Gated here as well as in updateActions(), the same way as
+  // browseLibrary(), so both File menu actions are covered either way.
+  if (indexing_ || searching_)
+    return;
+
   static const QString filter = [] {
     QSet<QString> exts;
     for (const QByteArray &f : QImageReader::supportedImageFormats())
@@ -861,8 +893,11 @@ void MainWindow::stopSearch() {
 
 void MainWindow::onSearchProgress(int done, int total) {
   if (total > 0) {
-    progress_->setValue(done * 100 / total);
-    stats_->setText(QStringLiteral("Comparing %1/%2").arg(done).arg(total));
+    // Same 64-bit guard as onIndexProgress; this is also called from stage one
+    // of the search now (the in-memory prefilter over the whole index), so the
+    // label must not claim a comparison is running when it is only ranking.
+    progress_->setValue(int(qint64(done) * 100 / total));
+    stats_->setText(QStringLiteral("Searching %1/%2").arg(done).arg(total));
   }
 }
 
@@ -957,6 +992,13 @@ void MainWindow::updateActions() {
   browseQueryBtn_->setEnabled(!busy);
   searchBtn_->setEnabled(
       busy ? searching_ : (!index_.empty() && !queryEdit_->text().isEmpty()));
+  // The File menu mirrors the browse buttons. These actions replace index_
+  // via browseLibrary(), so they must be locked out for exactly the same
+  // duration as the button, or a search worker reads freed memory.
+  if (indexAction_)
+    indexAction_->setEnabled(!busy);
+  if (queryAction_)
+    queryAction_->setEnabled(!busy);
 }
 
 // ----- theme ---------------------------------------------------------------
@@ -1031,10 +1073,8 @@ void MainWindow::showEvent(QShowEvent *event) {
   // available update raises its box over a finished window instead of a white
   // flash. The checker applies its own opt-out and daily throttle, so this
   // fires on every launch and costs nothing on all but one.
-  if (updates_) {
-    QTimer::singleShot(500, this,
-                       [this] { updates_->checkOnStartup(); });
-  }
+  QTimer::singleShot(500, this,
+                     [this] { updates_->checkOnStartup(); });
 }
 
 void MainWindow::applyThemeTo(QWidget *target) const {

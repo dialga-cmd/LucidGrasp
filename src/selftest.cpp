@@ -224,8 +224,21 @@ int runSelfTest()
             std::printf("FAIL: expected exactly 2 EXACT results, got %d\n\n",
                         exactCount);
             ++failures;
+        } else if (r1[0].score < 0.9 || r1[1].score < 0.9) {
+            // These scenes are smooth gradients with no corners, so ORB finds
+            // nothing: the score used to cap at ~0.72 no matter how identical
+            // the pair, which made the threshold mean different things on
+            // textured and keypoint-free image sets. Silence from ORB is no
+            // evidence of dissimilarity, so the signals that did run are
+            // renormalised and an identical pair must land near 1.0.
+            std::printf("FAIL: exact copies scored %.3f/%.3f; a keypoint-free "
+                        "pair should reach ~1.0, not the ORB-silent ceiling\n\n",
+                        r1[0].score, r1[1].score);
+            ++failures;
         } else {
-            std::printf("PASS: original.png and copy.png both EXACT at top\n\n");
+            std::printf("PASS: original.png and copy.png both EXACT at top, "
+                        "%.0f%% on a keypoint-free scene\n\n",
+                        r1[0].score * 100.0);
         }
     }
 
@@ -310,11 +323,13 @@ int runSelfTest()
     sceneC().save(tlib + QStringLiteral("/distractC.png"), "PNG");
 
     core::ImageIndex tindex;
+    QString qTex;  // filled when the textured index builds below; needed again
+                   // by the default-threshold case, so it lives at this scope
     if (!tindex.build(tlib)) {
         std::printf("FAIL: could not build textured index\n");
         ++failures;
     } else {
-        const QString qTex = qdir + QStringLiteral("/textured_query.png");
+        qTex = qdir + QStringLiteral("/textured_query.png");
         QFile::copy(tlib + QStringLiteral("/original.png"), qTex);
 
         std::vector<core::SearchResult> r4;
@@ -569,6 +584,48 @@ int runSelfTest()
             ++failures;
         } else {
             std::printf("PASS: opt-out, mute and throttle all hold\n\n");
+        }
+    }
+
+    // --- Case 9: default-threshold recall --------------------------------
+    // Every search above ran at threshold 0.0, which validates *ranking* but
+    // not that the shipped default of 50% surfaces the tool's reason for
+    // existing. A variant that ranked first but scored below 0.5 would be a
+    // silent miss for every user who leaves the spinner alone. The graded edit
+    // on the textured corpus is the realistic case (SSIM and ORB both live).
+    // The smooth corpus's 70-degree hue rotation is deliberately not asserted:
+    // a hue shift that large genuinely moves luma, and the tool is allowed to
+    // rank it below the default threshold without someone having to file a bug.
+    if (!tindex.empty() && !qTex.isEmpty()) {
+        std::vector<core::SearchResult> r9;
+        if (!tindex.searchFile(qTex, 0.5, r9)) {
+            std::printf("FAIL: default-threshold query unreadable\n\n");
+            ++failures;
+        } else {
+            std::printf("Case 9 — default threshold (50%%):\n");
+            printResults(r9);
+
+            const int rankOrig = rankOf(r9, QStringLiteral("original.png"));
+            const int rankGraded = rankOf(r9, QStringLiteral("graded.png"));
+            const int dA = rankOf(r9, QStringLiteral("distractA.png"));
+            const int dB = rankOf(r9, QStringLiteral("distractB.png"));
+            const int dC = rankOf(r9, QStringLiteral("distractC.png"));
+            const bool distractorAbove =
+                (dA >= 0 && rankGraded > dA) || (dB >= 0 && rankGraded > dB) ||
+                (dC >= 0 && rankGraded > dC);
+
+            if (rankOrig < 0 || rankGraded < 0) {
+                std::printf("FAIL: original/graded edit did not clear the "
+                            "default 50%% threshold\n\n");
+                ++failures;
+            } else if (distractorAbove) {
+                std::printf("FAIL: graded edit clears the default threshold "
+                            "but ranks below a distractor\n\n");
+                ++failures;
+            } else {
+                std::printf("PASS: original and graded edit clear the default "
+                            "50%% threshold\n\n");
+            }
         }
     }
 

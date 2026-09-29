@@ -106,6 +106,13 @@ private:
     QListWidget* results_ = nullptr;
     QSpinBox* thresholdSpin_ = nullptr;
     QPushButton* themeToggleBtn_ = nullptr;
+    // The File menu's library and query actions. Held as members so
+    // updateActions() can disable them for the same window a search worker is
+    // reading index_: browseLibrary() -> tryLoadIndex() replaces the vector
+    // underneath the worker, and the plain buttons were not the only way to
+    // reach that slot (Ctrl+I worked while the button was disabled).
+    QAction* indexAction_ = nullptr;
+    QAction* queryAction_ = nullptr;
     app::UpdateChecker *updates_ = nullptr;
     // The "Check for Updates Automatically" menu item. Kept so the opt-out can
     // be undone, and so the item's checkmark can be cleared when the dialog's

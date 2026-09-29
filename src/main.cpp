@@ -49,7 +49,23 @@ int runCli(const QStringList& args)
 
     const QString library = rest[0];
     const QString query = rest[1];
-    const double threshold = rest.size() == 3 ? rest[2].toDouble() / 100.0 : 0.5;
+    // Strict parse. toDouble() alone silently turns "abc" into 0.0, which
+    // reads as "threshold 0% — return every image in the library", and a value
+    // outside 0-100 would be passed through to the search unclamped. Reject
+    // both instead of guessing what the user meant.
+    double threshold = 0.5;
+    if (rest.size() == 3) {
+        bool parsed = false;
+        const double pct = rest[2].toDouble(&parsed);
+        if (!parsed || pct < 0.0 || pct > 100.0) {
+            std::fprintf(stderr,
+                         "error: threshold must be a number from 0 to 100, "
+                         "got '%s'\n",
+                         qPrintable(rest[2]));
+            return 2;
+        }
+        threshold = pct / 100.0;
+    }
 
     core::ImageIndex index;
     QElapsedTimer timer;
@@ -67,7 +83,11 @@ int runCli(const QStringList& args)
         int lastPct = -1;
         const bool built = index.build(library, [&](const core::BuildProgress& p) {
             // total == 0 means the file count is still being discovered.
-            const int pct = p.total > 0 ? p.done * 100 / p.total : 0;
+            // done * 100 in int overflows past ~21.4M files; the percentage is
+            // the only use, so the guard lives on this one expression.
+            const int pct = p.total > 0
+                                ? int(qint64(p.done) * 100 / p.total)
+                                : 0;
             if (pct != lastPct) {
                 lastPct = pct;
                 std::fprintf(stderr, "\rindexing %3d%% (%d files)   ", pct,
