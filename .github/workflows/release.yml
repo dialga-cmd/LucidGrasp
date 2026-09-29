@@ -3,6 +3,12 @@ name: Build and Release
 on:
   release:
     types: [published]
+  # The bug-fix review cycle needs CI feedback without publishing a release.
+  # The build + self-test steps run on every pull request; the packaging and
+  # asset-upload steps are gated on github.event_name == 'release' so a PR can
+  # neither touch a release nor fail trying to attach assets to a nonexistent
+  # one (softprops/action-gh-release has no tag to upload to on a PR ref).
+  pull_request:
 
 permissions:
   contents: write
@@ -33,6 +39,7 @@ jobs:
         QT_QPA_PLATFORM=offscreen ./LucidGrasp --selftest
 
     - name: Package Release
+      if: github.event_name == 'release'
       run: |
         mkdir -p package/LucidGrasp
         cp build/LucidGrasp package/LucidGrasp/
@@ -44,6 +51,7 @@ jobs:
         tar -czvf lucidgrasp-linux-x64.tar.gz LucidGrasp/
 
     - name: Upload Release Asset
+      if: github.event_name == 'release'
       uses: softprops/action-gh-release@v2
       with:
         files: package/lucidgrasp-linux-x64.tar.gz
@@ -112,6 +120,7 @@ jobs:
         }
 
     - name: Bundle Dependencies
+      if: github.event_name == 'release'
       shell: pwsh
       run: |
         $dest = "package\LucidGrasp"
@@ -128,11 +137,13 @@ jobs:
         Copy-Item "$env:OpenCV_BIN\opencv_world*.dll" $dest\
 
     - name: Install Inno Setup
+      if: github.event_name == 'release'
       shell: pwsh
       run: |
         choco install innosetup -y --no-progress
 
     - name: Compile Windows Installer
+      if: github.event_name == 'release'
       shell: pwsh
       run: |
         # Read the version out of the CMake cache rather than keeping a third
@@ -162,6 +173,7 @@ jobs:
         if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
 
     - name: Upload Release Asset
+      if: github.event_name == 'release'
       uses: softprops/action-gh-release@v2
       with:
         files: package/LucidGrasp_Setup_x64.exe
