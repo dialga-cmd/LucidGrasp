@@ -176,7 +176,7 @@ Indexing runs on a background thread and reports progress back to the UI through
 
 ### Searching
 
-Search also runs on a background thread, with progress reporting and a working Stop button, and the UI stays responsive throughout. While a search is in flight the inputs that would invalidate the in-memory index are disabled, since the worker reads the index directly rather than working on a copy.
+Search also runs on a background thread, with progress reporting and a working Stop button, and the UI stays responsive throughout. While a search is in flight the inputs that would invalidate the in-memory index are disabled, since the worker reads the index directly rather than working on a copy. The File menu's library and query actions are part of that gate too: through 1.2 they stayed live during a search -- Ctrl+I reached `browseLibrary()` and replaced the index vector underneath the worker, a use-after-free that only shows up under a load and a sufficiently long query -- they are now stored as members and toggled in `updateActions()` alongside the buttons, with the same guards on the handler slots. Stage one of the search (the in-memory prefilter over the whole index) also consults the cancellation callback now, so Stop works during the first pass on a whole-filesystem index instead of only once decoding starts. And when ORB is silent on *both* images because neither yielded a keypoint, its 35% share is renormalised away rather than counted as dissimilarity: a byte-identical pair of smooth, gradient-only images used to cap at 0.72 while a textured pair reached 1.0, which made the user's threshold mean different things on different libraries.
 
 ### A Note on the Performance Table
 

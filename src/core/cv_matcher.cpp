@@ -128,13 +128,26 @@ double CvMatcher::match(const Prepared &a, const Prepared &b) const {
   if (!a.valid || !b.valid)
     return 0.0;
 
+  const double ssim = computeSSIM(a.gray, b.gray);
+  const double hist = cv::compareHist(a.hist, b.hist, cv::HISTCMP_INTERSECT);
+  const double orb = orbSimilarity(a.keypoints, a.descriptors, b.keypoints,
+                                   b.descriptors);
+
+  // When neither image yields a single keypoint, ORB did not run: its share is
+  // silence, not evidence of dissimilarity. Scoring it as 0.0 caps a
+  // byte-identical pair of smooth images at 0.72 (0.8 * 0.65 + 0.2) while the
+  // same pair with texture reaches 1.0, so the user's threshold would mean
+  // different things on different libraries. Renormalise the two signals that
+  // actually ran onto the full range in that case. The prefilter always has a
+  // keypoint-free parallel: pHash/dHash are gradient-free on such images too,
+  // so there is no hidden keypoint term to double-count.
+  if (a.keypoints.empty() && b.keypoints.empty())
+    return (0.45 * ssim + 0.20 * hist) / 0.65;
+
   // 45% SSIM (color-blind structural comparison, catches edited versions)
   // 35% ORB  (keypoint matching, catches crops and rotations)
   // 20% color histogram (pixel color distribution, boosts exact matches)
-  return 0.45 * computeSSIM(a.gray, b.gray) +
-         0.35 * orbSimilarity(a.keypoints, a.descriptors, b.keypoints,
-                              b.descriptors) +
-         0.20 * cv::compareHist(a.hist, b.hist, cv::HISTCMP_INTERSECT);
+  return 0.45 * ssim + 0.35 * orb + 0.20 * hist;
 }
 
 } // namespace core
