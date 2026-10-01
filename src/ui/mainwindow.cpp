@@ -1,8 +1,11 @@
 #include "ui/mainwindow.h"
 
+#include "core/embedder.h"
+
 #include <QAbstractButton>
 #include <QAction>
 #include <QColor>
+#include <QComboBox>
 #include <QDesktopServices>
 #include <QDialog>
 #include <QElapsedTimer>
@@ -28,6 +31,7 @@
 #include <QProgressBar>
 #include <QPushButton>
 #include <QSet>
+#include <QSettings>
 #include <QShowEvent>
 #include <QSpinBox>
 #include <QStatusBar>
@@ -278,6 +282,10 @@ ThemeColours coloursFromPalette(const QPalette &p) {
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent), desktopPalette_(QGuiApplication::palette()) {
   setWindowTitle(QStringLiteral("LucidGrasp"));
+  // The mode is read from settings after the widget exists (below), and an
+  // embedding build from a previous session may have been left half-written by
+  // a crash. Nothing here needs the cache to be valid, so there is no
+  // reconciliation step beyond what load() already does quietly.
 
   auto *central = new QWidget(this);
   central->setObjectName(QStringLiteral("centralWidget"));
@@ -363,11 +371,61 @@ MainWindow::MainWindow(QWidget *parent)
   searchBtn_->setDefault(true);
 
   auto *threshRow = new QHBoxLayout;
-  threshRow->addWidget(new QLabel(QStringLiteral("Threshold (%):")));
+
+  // The mode selector. Present only in a build that has ONNX Runtime, since
+  // without it Similar mode is not compiled in at all and offering a choice
+  // that cannot be honoured would be a lie.
+  if (core::ImageIndex::similarCompiled()) {
+    auto *modeRow = new QHBoxLayout;
+    modeRow->addWidget(new QLabel(QStringLiteral("Mode:")));
+    modeCombo_ = new QComboBox(queryGroup_);
+    modeCombo_->setObjectName(QStringLiteral("modeCombo"));
+    modeCombo_->addItem(QStringLiteral("Lookalike"),
+                        int(core::ImageIndex::SearchMode::Lookalike));
+    modeCombo_->addItem(QStringLiteral("Similar"),
+                        int(core::ImageIndex::SearchMode::Similar));
+    modeRow->addWidget(modeCombo_, 1);
+    queryLayout->addLayout(modeRow);
+
+    // Restored last, so a stored "Similar" cannot be applied before the rest of
+    // the panel exists. Falls back to Lookalike, which is the mode that works
+    // without a model or a cache.
+    QSettings settings;
+    const int stored = settings.value(QStringLiteral("search/mode"),
+                                      int(core::ImageIndex::SearchMode::Lookalike))
+                           .toInt();
+    const int idx = modeCombo_->findData(stored);
+    modeCombo_->setCurrentIndex(idx >= 0 ? idx : 0);
+
+    embedBtn_ = new QPushButton(QStringLiteral("Build embedding cache"),
+                                queryGroup_);
+    embedBtn_->setObjectName(QStringLiteral("embedBtn"));
+    queryLayout->addWidget(embedBtn_);
+
+    embedNote_ = new QLabel(queryGroup_);
+    embedNote_->setObjectName(QStringLiteral("embedNote"));
+    embedNote_->setWordWrap(true);
+    queryLayout->addWidget(embedNote_);
+    connect(embedBtn_, &QPushButton::clicked, this, [this] {
+      // One slot for both meanings of the same button: while a build runs it
+      // stops it, which is why this is a toggle rather than two buttons and why
+      // a Stop has a visible effect on the label.
+      if (embedding_)
+        stopEmbedBuild();
+      else
+        startEmbedBuild();
+    });
+    connect(modeCombo_, &QComboBox::currentIndexChanged, this,
+            [this] { refreshSimilarUi(); });
+  }
+
+  threshLabel_ = new QLabel(QStringLiteral("Threshold (%):"));
+  threshRow->addWidget(threshLabel_);
   thresholdSpin_ = new QSpinBox(queryGroup_);
   thresholdSpin_->setRange(0, 100);
   thresholdSpin_->setValue(50);
   threshRow->addWidget(thresholdSpin_);
+  threshRow->addStretch(1);
 
   queryLayout->addWidget(searchBtn_);
   queryLayout->addLayout(threshRow);
@@ -431,6 +489,9 @@ MainWindow::MainWindow(QWidget *parent)
 
 MainWindow::~MainWindow() {
   cancel_ = true;
+  // The builder has its own pool, and its destructor cancels and joins it, so
+  // this must be reached before the QObject children are destroyed -- which it
+  // is, being the window's own destructor.
   if (worker_.joinable())
     worker_.join();
   if (searchWorker_.joinable())
@@ -603,7 +664,7 @@ void MainWindow::browseLibrary() {
   // tryLoadIndex() replacing the vector underneath it. The button is gated in
   // updateActions(), but the menu action shares this slot, so the guard has to
   // live here rather than on the widget.
-  if (indexing_ || searching_)
+  if (indexing_ || searching_ || embedding_)
     return;
 
   const QString dir = askForDirectory(QStringLiteral("Select image library"));
@@ -618,7 +679,7 @@ void MainWindow::tryLoadIndex(const QString &dir) {
   // Same guard as browseLibrary(), at the mutation site: index_.clear() and
   // index_.load() below rewrite the vector a search worker is reading. Cheap
   // defence in depth for any future caller that forgets to check.
-  if (indexing_ || searching_)
+  if (indexing_ || searching_ || embedding_)
     return;
 
   results_->clear();
@@ -641,6 +702,78 @@ void MainWindow::tryLoadIndex(const QString &dir) {
     statusBar()->showMessage(QStringLiteral("No cached index found"), 4000);
   }
   updateActions();
+  refreshSimilarUi();
+}
+
+bool MainWindow::similarSelected() const {
+  return modeCombo_ &&
+         modeCombo_->currentData().toInt() ==
+             int(core::ImageIndex::SearchMode::Similar);
+}
+
+void MainWindow::refreshSimilarUi() {
+  if (!modeCombo_)
+    return;
+
+  const bool busy = indexing_ || searching_ || embedding_;
+
+  // The threshold is a Lookalike concept: it is a percentage over a score built
+  // from SSIM, ORB and the prefilter. A cosine similarity in an embedding space
+  // is not a percentage -- two tulips of different colours land around 0.7-0.8,
+  // which as a percentage reads like a weak match -- so leaving the control
+  // visible would invite a threshold that silently discards the results the
+  // mode exists to find. Hidden rather than disabled so it does not read as
+  // something that could be turned on.
+  const bool similar = similarSelected();
+  threshLabel_->setVisible(!similar);
+  thresholdSpin_->setVisible(!similar);
+  thresholdSpin_->setEnabled(!busy && !similar);
+
+  if (!core::ImageIndex::similarAvailable()) {
+    // The weights are not bundled and the app does not download them, so say
+    // where they go. Otherwise this reads as a mode that is mysteriously
+    // unavailable.
+    embedNote_->setText(
+        QStringLiteral("Similar mode needs the model file:\n%1")
+            .arg(core::embedderModelPath()));
+    embedBtn_->setVisible(false);
+    modeCombo_->setCurrentIndex(0); // it cannot do anything
+    return;
+  }
+  if (index_.empty()) {
+    embedNote_->setText(QStringLiteral("Index a library first."));
+    embedBtn_->setVisible(false);
+    return;
+  }
+
+  const int total = int(index_.size());
+  const int covered = index_.embeddedCount();
+  const int missing = total - covered;
+
+  if (covered == 0) {
+    embedNote_->setText(
+        QStringLiteral("No embeddings yet for %1 images. Building runs in the "
+                       "background and can be stopped and resumed.")
+            .arg(total));
+    embedBtn_->setText(QStringLiteral("Build embedding cache (%1 images)")
+                           .arg(missing));
+    embedBtn_->setVisible(true);
+    embedBtn_->setEnabled(!busy && missing > 0);
+  } else if (missing > 0) {
+    // A partial cache is the normal state after a cancelled build, and it must
+    // not be able to pass for a small library.
+    embedNote_->setText(
+        QStringLiteral("Similar results cover %1 of %2 images.").arg(covered).arg(total));
+    embedBtn_->setText(QStringLiteral("Resume embedding cache (%1 left)")
+                           .arg(missing));
+    embedBtn_->setVisible(true);
+    embedBtn_->setEnabled(!busy);
+  } else {
+    embedNote_->setText(QStringLiteral("Similar results cover all %1 images.")
+                            .arg(total));
+    embedBtn_->setVisible(false);
+  }
+  modeCombo_->setEnabled(!busy);
 }
 
 void MainWindow::startIndex() {
@@ -748,6 +881,11 @@ void MainWindow::onIndexFinished(bool ok,
   index_ = std::move(*index);
 
   const bool saved = index_.save(core::defaultIndexPath(libEdit_->text()));
+  // A reindex can have added images since the cache was written, so the coverage
+  // line would otherwise be stale the moment indexing ends. Nothing is
+  // recomputed here: the build button picks up only what is missing, which is
+  // the whole point of keying the cache by file hash.
+  index_.loadEmbeddings(core::defaultEmbeddingPath(index_.root()));
 
   stats_->setText(QStringLiteral("Indexed %1 images (%2 skipped)%3")
                       .arg(index_.size())
@@ -755,6 +893,157 @@ void MainWindow::onIndexFinished(bool ok,
                       .arg(saved ? QStringLiteral(", index saved")
                                  : QStringLiteral(", cache save failed")));
   statusBar()->showMessage(QStringLiteral("Indexing complete"), 4000);
+  setBusy(false);
+  refreshSimilarUi();
+}
+
+// --- Similar mode: the embedding build ------------------------------------
+//
+// Started only from the button. Never on indexing and never on a search: the
+// measured cost is 22 ms/image on all cores, so a whole-filesystem library is a
+// multi-hour job, and a user who never asked for Similar must never be committed
+// to it or made to wait for it.
+
+void MainWindow::startEmbedBuild() {
+  if (embedding_ || indexing_ || searching_ || !modeCombo_)
+    return;
+  if (index_.empty())
+    return;
+  if (!core::ImageIndex::similarAvailable()) {
+    QMessageBox::information(
+        this, QStringLiteral("Model missing"),
+        QStringLiteral("Similar mode needs the model file:\n%1")
+            .arg(core::embedderModelPath()));
+    return;
+  }
+
+  // The path list and its hashes are read on this thread, from index_, because
+  // the worker below must not be racing the UI. Byte-identical copies share one
+  // fileHash, so the builder dedupes them itself.
+  std::vector<QString> paths;
+  std::vector<uint64_t> hashes;
+  paths.reserve(index_.size());
+  hashes.reserve(index_.size());
+  for (const auto &path : index_.absPaths())
+    paths.push_back(path);
+  for (const auto &hash : index_.fileHashes())
+    hashes.push_back(hash);
+
+  const QString cachePath = core::defaultEmbeddingPath(index_.root());
+
+  embedding_ = true;
+  cancel_ = false;
+  embedBtn_->setText(QStringLiteral("Stop embedding build"));
+  embedBtn_->setToolTip(
+      QStringLiteral("Stop the build. Everything embedded so far is kept."));
+  progress_->setRange(0, 100);
+  progress_->setValue(0);
+  setBusy(true);
+  statusBar()->showMessage(QStringLiteral("Building embedding cache…"));
+
+  worker_ = std::thread([this, cachePath, paths = std::move(paths),
+                         hashes = std::move(hashes)] {
+    QString error;
+    bool started = false;
+    try {
+      started = embedder_.start(
+          cachePath, paths, hashes, [this](int done, int total,
+                                           const QString &current) {
+            // Marshalled like every other progress report: the callback runs on
+            // a worker thread, and the widgets it would touch belong to the
+            // GUI thread.
+            QMetaObject::invokeMethod(
+                this,
+                [this, done, total, current] {
+                  onEmbedProgress(done, total, current);
+                },
+                Qt::QueuedConnection);
+          });
+      if (!started)
+        error = embedder_.errorString();
+    } catch (const std::exception &e) {
+      error = QString::fromUtf8(e.what());
+    } catch (...) {
+      error = QStringLiteral("unknown error");
+    }
+
+    const bool cancelled = cancel_.load();
+    const int failed = embedder_.failed();
+    // Joins the pool and closes the cache. Cheap on the "nothing to do" path,
+    // and the only point at which the finished cache can be handed over.
+    core::EmbeddingCache cache = embedder_.take();
+
+    QMetaObject::invokeMethod(
+        this,
+        [this, started, error, cancelled, failed,
+         cache = std::move(cache)]() mutable {
+          // Installing the cache writes index_, so this must land only when no
+          // other worker holds it. The buttons are locked out for the whole
+          // build, and this runs before they are re-enabled.
+          if (started && !cache.isValid() && error.isEmpty())
+            error = QStringLiteral("no embeddings were produced");
+          if (started && !error.isEmpty())
+            index_.clearEmbeddings();
+          else
+            index_.adoptEmbeddings(std::move(cache));
+          onEmbedFinished();
+          if (!error.isEmpty()) {
+            stats_->setText(QStringLiteral("Embedding build failed: %1")
+                                .arg(error));
+            statusBar()->showMessage(QStringLiteral("Embedding build failed"),
+                                     6000);
+          } else if (cancelled) {
+            stats_->setText(QStringLiteral("Embedding build stopped (%1 images "
+                                            "embedded, %2 unreadable)")
+                                .arg(index_.embeddingCacheCount())
+                                .arg(failed));
+            statusBar()->showMessage(QStringLiteral("Embedding build stopped"),
+                                     6000);
+          } else {
+            stats_->setText(
+                QStringLiteral("Embeddings: %1 of %2 images (%3 unreadable)")
+                    .arg(index_.embeddingCacheCount())
+                    .arg(index_.size())
+                    .arg(failed));
+            statusBar()->showMessage(QStringLiteral("Embedding cache complete"),
+                                     6000);
+          }
+          refreshSimilarUi();
+        },
+        Qt::QueuedConnection);
+  });
+}
+
+void MainWindow::stopEmbedBuild() {
+  if (!embedding_)
+    return;
+  embedder_.cancel();
+  embedBtn_->setText(QStringLiteral("Stopping..."));
+  embedBtn_->setEnabled(false);
+  statusBar()->showMessage(
+      QStringLiteral("Stopping... embeddings written so far are kept"), 4000);
+}
+
+void MainWindow::onEmbedProgress(int done, int total,
+                                 const QString &current) {
+  if (total <= 0)
+    return;
+  progress_->setValue(int(qint64(done) * 100 / total));
+  stats_->setText(QStringLiteral("Embedding %1/%2\n%3")
+                      .arg(done)
+                      .arg(total)
+                      .arg(QFileInfo(current).fileName()));
+}
+
+void MainWindow::onEmbedFinished() {
+  if (worker_.joinable())
+    worker_.join();
+  embedding_ = false;
+  if (embedBtn_) {
+    embedBtn_->setText(QStringLiteral("Build embedding cache"));
+    embedBtn_->setToolTip(QString());
+    embedBtn_->setEnabled(true);
+  }
   setBusy(false);
 }
 
@@ -775,7 +1064,7 @@ void MainWindow::browseQuery() {
   // or index is running, and replacing the query mid-search is at best
   // confusing. Gated here as well as in updateActions(), the same way as
   // browseLibrary(), so both File menu actions are covered either way.
-  if (indexing_ || searching_)
+  if (indexing_ || searching_ || embedding_)
     return;
 
   static const QString filter = [] {
@@ -821,6 +1110,12 @@ void MainWindow::startSearch() {
     stopSearch();
     return;
   }
+  // The guard the other six entry points have. Reading index_ from the search
+  // worker while an index build or an embedding build is replacing it is a
+  // use-after-free, and the search button is only disabled in updateActions(),
+  // which a menu shortcut or a queued click can outrun.
+  if (indexing_ || embedding_)
+    return;
   if (index_.empty()) {
     QMessageBox::information(this, QStringLiteral("No index"),
                              QStringLiteral("Index a library first."));
@@ -832,6 +1127,19 @@ void MainWindow::startSearch() {
                              QStringLiteral("Choose a query image first."));
     return;
   }
+
+  const bool similar = similarSelected();
+  if (similar && !core::ImageIndex::similarAvailable()) {
+    QMessageBox::information(
+        this, QStringLiteral("Model missing"),
+        QStringLiteral("Similar mode needs the model file:\n%1")
+            .arg(core::embedderModelPath()));
+    return;
+  }
+
+  if (modeCombo_)
+    QSettings().setValue(QStringLiteral("search/mode"),
+                         modeCombo_->currentData().toInt());
 
   searching_ = true;
   cancel_ = false;
@@ -847,16 +1155,21 @@ void MainWindow::startSearch() {
   // Runs off the GUI thread so the window stays responsive and cancellable
   // no matter how large the library is. index_ is only read here, and the
   // UI is locked out until onSearchFinished, so there is no shared mutation.
+  // Read in both modes and passed through in both modes. Similar ignores it
+  // inside ImageIndex::search(); Lookalike applies it, and dropping it there
+  // silently disabled the cutoff the user had set.
   const double threshold = thresholdSpin_->value() / 100.0;
-  searchWorker_ = std::thread([this, query, threshold] {
+  const auto mode = similar ? core::ImageIndex::SearchMode::Similar
+                            : core::ImageIndex::SearchMode::Lookalike;
+  searchWorker_ = std::thread([this, query, threshold, mode] {
     // Same rule as the index worker: an escaping exception would abort the
     // process, and this path decodes images from arbitrary paths.
     std::vector<core::SearchResult> results;
     bool ok = false;
     QString error;
     try {
-      ok = index_.searchFile(
-          query, threshold, results, [this](int done, int total) {
+      ok = index_.search(
+          mode, query, threshold, results, [this](int done, int total) {
             QMetaObject::invokeMethod(
                 this, [this, done, total] { onSearchProgress(done, total); },
                 Qt::QueuedConnection);
@@ -923,7 +1236,13 @@ void MainWindow::onSearchFinished(bool ok,
     return;
   }
   if (results.empty()) {
-    stats_->setText(QStringLiteral("No matches above threshold."));
+    // Two different reasons to come back empty, and the wording has to tell them
+    // apart: a threshold the user set, or a Similar search over a library with
+    // no embeddings yet.
+    stats_->setText(
+        similarSelected()
+            ? QStringLiteral("No Similar results — is the embedding cache built?")
+            : QStringLiteral("No matches above threshold."));
     statusBar()->showMessage(QStringLiteral("No matches"), 4000);
     return;
   }
@@ -943,7 +1262,13 @@ void MainWindow::renderResults(const std::vector<core::SearchResult> &results) {
     // that decides what a match is. Re-filtering here used the live widget
     // value, which made the GUI a second source of truth that could disagree
     // with the CLI.
-    const int pct = int(r.score * 100.0 + 0.5);
+    // A cosine similarity is not a percentage. Printing "72%" for a strong
+    // Similar match, where a red tulip and a green one are around 0.7-0.8 apart,
+    // reads like a weak match and is the reason the threshold control is hidden
+    // in that mode. Three decimals of the actual value, always.
+    const QString score =
+        similarSelected() ? QString::number(r.score, 'f', 3)
+                          : QString::number(int(r.score * 100.0 + 0.5));
 
     // Decode straight to thumbnail size rather than loading the full
     // image, which matters when results can be very large photographs.
@@ -957,12 +1282,12 @@ void MainWindow::renderResults(const std::vector<core::SearchResult> &results) {
         QIcon(QPixmap::fromImage(thumb)),
         QStringLiteral("%1%2\n%3")
             .arg(r.exact ? QStringLiteral("EXACT ") : QString())
-            .arg(pct)
+            .arg(score)
             .arg(QFileInfo(r.absPath).fileName()));
     item->setData(Qt::UserRole, r.absPath);
     item->setToolTip(
         r.absPath + QStringLiteral("\nscore: ") +
-        QString::number(r.score, 'f', 3) +
+        QString::number(r.score, 'f', 4) +
         (r.exact ? QStringLiteral("\nbyte-identical copy") : QString()));
     item->setSizeHint({170, 200});
     results_->addItem(item);
@@ -974,7 +1299,7 @@ void MainWindow::setBusy(bool busy) {
   // invalidate them are locked out.
   browseLibBtn_->setEnabled(!busy);
   browseQueryBtn_->setEnabled(!busy);
-  thresholdSpin_->setEnabled(!busy);
+  thresholdSpin_->setEnabled(!busy && !similarSelected());
   updateActions();
 }
 
@@ -985,7 +1310,9 @@ void MainWindow::openResult(QListWidgetItem *item) {
 }
 
 void MainWindow::updateActions() {
-  const bool busy = indexing_ || searching_;
+  // An embedding build holds index_ for reading and rewrites the cache the next
+  // Similar search reads, so it locks the same controls a search does.
+  const bool busy = indexing_ || searching_ || embedding_;
   const bool canIndex = !busy && !libEdit_->text().isEmpty();
   indexBtn_->setEnabled(indexing_ || canIndex);
   browseLibBtn_->setEnabled(!busy);
@@ -999,6 +1326,7 @@ void MainWindow::updateActions() {
     indexAction_->setEnabled(!busy);
   if (queryAction_)
     queryAction_->setEnabled(!busy);
+  refreshSimilarUi();
 }
 
 // ----- theme ---------------------------------------------------------------
@@ -1101,6 +1429,9 @@ QLabel#titleLabel {
     padding: 2px 2px 6px 2px;
 }
 QLabel#statsLabel { color: @muted; }
+/* The Similar-mode coverage line. Muted like the stats label, and sized to sit
+   under the Build button without changing the panel's own height much. */
+QLabel#embedNote { color: @muted; font-size: 11px; }
 QLabel#previewLabel {
     border: 1px dashed @border; border-radius: 6px;
     color: @muted; background: @field;
@@ -1115,10 +1446,12 @@ QGroupBox::title {
     left: 10px; padding: 0 4px; color: @muted; font-weight: 600;
 }
 
-QLineEdit, QSpinBox {
+QLineEdit, QSpinBox, QComboBox {
     background: @field; border: 1px solid @border; border-radius: 6px;
     padding: 5px 8px; selection-background-color: @accent;
 }
+QComboBox { padding-right: 20px; }
+QComboBox:disabled { color: @muted; }
 QLineEdit:read-only { color: @muted; }
 QLineEdit:focus, QSpinBox:focus { border-color: @accent; }
 /* The arrows are left to Qt to draw from the palette rather than replaced with
@@ -1185,6 +1518,15 @@ QScrollBar::handle:horizontal {
 }
 QScrollBar::add-line, QScrollBar::sub-line { height: 0; width: 0; }
 QScrollBar::add-page, QScrollBar::sub-page { background: none; }
+
+/* The mode dropdown's popup is a top-level widget, so it needs the panel and
+   item colours explicitly or it renders with the platform's white background
+   behind near-white text. Same reason as the QMenu rules below. */
+QComboBox QAbstractItemView {
+    background: @panel; color: @text;
+    border: 1px solid @border; selection-background-color: @checked;
+    selection-color: @onChecked;
+}
 
 /* A popup menu is a top-level widget with its own surface, so it is given the
    panel colour explicitly rather than inheriting the window's. */

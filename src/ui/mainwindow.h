@@ -1,6 +1,7 @@
 #pragma once
 
 #include "app/update_checker.h"
+#include "core/embedder_builder.h"
 #include "core/index.h"
 
 #include <atomic>
@@ -13,6 +14,7 @@
 #include <QPalette>
 
 class QAction;
+class QComboBox;
 class QGroupBox;
 class QLabel;
 class QLineEdit;
@@ -47,6 +49,15 @@ private slots:
 private:
     void tryLoadIndex(const QString& dir);
     void onIndexProgress(int done, int total, const QString& current);
+    void startEmbedBuild();
+    void stopEmbedBuild();
+    void onEmbedProgress(int done, int total, const QString& current);
+    void onEmbedFinished();
+    // Rebuilds the Similar-mode controls: model presence, cache coverage, and
+    // whether the build button still has work to do. Read-only over the index,
+    // so it is called whenever any of its inputs can have changed.
+    void refreshSimilarUi();
+    bool similarSelected() const;
     void onIndexFinished(bool ok, std::unique_ptr<core::ImageIndex> index,
                          const QString& error);
     void onSearchProgress(int done, int total);
@@ -106,6 +117,17 @@ private:
     QListWidget* results_ = nullptr;
     QSpinBox* thresholdSpin_ = nullptr;
     QPushButton* themeToggleBtn_ = nullptr;
+    // Similar mode. Hidden entirely in a build without ONNX Runtime, since
+    // there the mode does not exist rather than merely being unavailable.
+    QComboBox* modeCombo_ = nullptr;
+    QLabel* threshLabel_ = nullptr;
+    QPushButton* embedBtn_ = nullptr;
+    QLabel* embedNote_ = nullptr;
+    // A value, not a pointer: the worker pool has to be cancelled and joined
+    // before the widgets it reports into are destroyed, and a member makes that
+    // the language's job rather than a delete in the right place in the
+    // destructor.
+    core::EmbeddingBuilder embedder_;
     // The File menu's library and query actions. Held as members so
     // updateActions() can disable them for the same window a search worker is
     // reading index_: browseLibrary() -> tryLoadIndex() replaces the vector
@@ -122,7 +144,6 @@ private:
     // happened on their command gets an answer and one that happened on the
     // automatic schedule stays silent.
     bool updateCheckManual_ = false;
-
     bool darkMode_ = false;
 
     // Read by the search worker while it runs, so the UI must not mutate or
@@ -134,4 +155,8 @@ private:
     QElapsedTimer searchTimer_;
     bool indexing_ = false;
     bool searching_ = false;
+    // True while a Similar-mode embedding build is running. It holds index_ only
+    // to read file hashes, but it writes the cache that the next Similar search
+    // will read, so it locks the same controls a search does.
+    bool embedding_ = false;
 };

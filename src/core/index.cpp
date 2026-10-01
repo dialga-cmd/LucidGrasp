@@ -1,6 +1,11 @@
 #include "core/index.h"
 
+#ifdef LUCIDGRASP_HAVE_ORT
+#include "core/embedder.h"
+#endif
+
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <iterator>
 
@@ -168,7 +173,11 @@ bool collectImages(const QString &startDir, QStringList &out,
 
 } // namespace
 
-QString defaultIndexPath(const QString &rootDir) {
+// The shared part of the two cache paths below. Both the index and the
+// embedding cache are keyed by the library they describe, so a relative root
+// such as "." must not collide with a different directory that happens to be
+// spelled the same way.
+QString cachePathFor(const QString &rootDir, const QString &suffix) {
   // Built from the generic data location rather than AppDataLocation, which
   // would repeat the organisation and application name in the path.
   QString base = QStandardPaths::writableLocation(
@@ -180,9 +189,6 @@ QString defaultIndexPath(const QString &rootDir) {
   const QString dir = base + QStringLiteral("/indexes");
   QDir().mkpath(dir);
 
-  // Resolve to a real path first: the cache is keyed by the library it
-  // describes, so a relative root such as "." must not collide with a
-  // different directory that happens to be spelled the same way.
   const QString root = resolveRoot(rootDir);
 
   // Readable label plus a digest of the resolved path, so two libraries with
@@ -199,7 +205,18 @@ QString defaultIndexPath(const QString &rootDir) {
       QCryptographicHash::hash(root.toUtf8(), QCryptographicHash::Sha1)
           .toHex()
           .left(16));
-  return QStringLiteral("%1/%2-%3.bin").arg(dir, label, digest);
+  return QStringLiteral("%1/%2-%3%4").arg(dir, label, digest, suffix);
+}
+
+QString defaultIndexPath(const QString &rootDir) {
+  return cachePathFor(rootDir, QStringLiteral(".bin"));
+}
+
+QString defaultEmbeddingPath(const QString &rootDir) {
+  // Same directory and same <label>-<digest> key as the index, so the two
+  // caches of a library sit beside each other and either one is recognisable
+  // as belonging to the other.
+  return cachePathFor(rootDir, QStringLiteral(".emb"));
 }
 
 QString legacyIndexPath(const QString &rootDir) {
@@ -362,7 +379,28 @@ bool ImageIndex::load(const QString &filePath) {
     clear();
     return false;
   }
+  // Picked up here, quietly: a missing or stale embedding cache is the normal
+  // state for a library that has never been embedded, and it is not a reason to
+  // refuse an otherwise good index.
+  loadEmbeddings(defaultEmbeddingPath(root_));
   return true;
+}
+
+std::vector<QString> ImageIndex::absPaths() const {
+  const QDir root(root_);
+  std::vector<QString> out;
+  out.reserve(entries_.size());
+  for (const IndexEntry &e : entries_)
+    out.push_back(root.absoluteFilePath(e.relPath));
+  return out;
+}
+
+std::vector<uint64_t> ImageIndex::fileHashes() const {
+  std::vector<uint64_t> out;
+  out.reserve(entries_.size());
+  for (const IndexEntry &e : entries_)
+    out.push_back(e.features.fileHash);
+  return out;
 }
 
 std::vector<SearchResult> ImageIndex::search(const Features &query,
@@ -511,10 +549,171 @@ bool ImageIndex::searchFile(const QString &queryPath, double threshold,
   return true;
 }
 
+// --- Similar mode --------------------------------------------------------
+//
+// Built only when the model is present, so a machine without the weights has
+// the enum but not the second mode: the UI hides the selector in that case and a
+// caller reaching here gets a clear false rather than a silent Lookalike result
+// under a Similar label.
+#ifdef LUCIDGRASP_HAVE_ORT
+bool ImageIndex::similarAvailable() { return embedderModelPresent(); }
+
+int ImageIndex::embeddedCount() const {
+  if (!embeddings_.isValid())
+    return 0;
+  int n = 0;
+  for (const IndexEntry &e : entries_)
+    if (embeddings_.rowFor(e.features.fileHash) >= 0)
+      ++n;
+  return n;
+}
+
+int ImageIndex::missingEmbeddingCount() const {
+  int n = 0;
+  for (const IndexEntry &e : entries_)
+    if (embeddings_.rowFor(e.features.fileHash) < 0)
+      ++n;
+  return n;
+}
+
+void ImageIndex::clearEmbeddings() { embeddings_.clear(); }
+
+bool ImageIndex::loadEmbeddings(const QString &path) {
+  if (!embeddings_.load(path)) {
+    // A missing or stale cache is the normal state before the first build, not
+    // a failure. The next build simply writes a fresh one.
+    embeddings_.clear();
+    return false;
+  }
+  return true;
+}
+
+bool ImageIndex::search(SearchMode mode, const QString &queryPath,
+                        double threshold, std::vector<SearchResult> &out,
+                        SearchProgressFn progress) const {
+  // The caller's threshold goes straight through. It used to be dropped here and
+  // pinned to 0.0, which disabled the cutoff and returned every entry above 0%
+  // no matter what the user had set.
+  if (mode == SearchMode::Lookalike)
+    return searchFile(queryPath, threshold, out, std::move(progress));
+
+  out.clear();
+  if (!embedderModelPresent())
+    return false;
+  // No embeddings yet: a well-defined empty result rather than a fallback to
+  // Lookalike, which would be a different search than the one that was asked
+  // for.
+  if (!embeddings_.isValid())
+    return true;
+
+  std::vector<float> query;
+  if (!sharedEmbedder().embedFile(queryPath, query))
+    return false;
+  const int dim = int(query.size());
+  if (dim <= 0)
+    return false;
+
+  // One brute-force pass over the cache. The query is a unit vector and a
+  // stored row is a quantised unit vector scaled by its own peak, so the dot
+  // product divided by the row's own length is the cosine. The division is not
+  // optional: toRow() normalises each vector by its own largest component, so
+  // without it every score carries that row's arbitrary scale (values in the
+  // hundreds) and results rank by magnitude rather than by similarity.
+  struct Scored {
+    double score = 0.0;
+    uint32_t entry = 0;
+  };
+  std::vector<Scored> pool;
+  pool.reserve(entries_.size());
+
+  const int total = int(entries_.size());
+  for (size_t i = 0; i < entries_.size(); ++i) {
+    // The same throttle as stage one above, for the same reason: this loop is
+    // the whole search cost, so Stop has to be able to interrupt it.
+    if (progress &&
+        (i % 8192 == 0 || i + 1 == entries_.size()) &&
+        !progress(static_cast<int>(i), total))
+      return false;
+
+    const int row = embeddings_.rowFor(entries_[i].features.fileHash);
+    // No embedding yet: a partially built cache covers part of the library, and
+    // an entry with no vector is skipped rather than scored as a mismatch.
+    if (row < 0)
+      continue;
+    const int8_t *vec = embeddings_.vectorAt(row);
+    if (!vec)
+      continue;
+    double dot = 0.0;
+    double sumSquares = 0.0;
+    for (int k = 0; k < dim; ++k) {
+      const double v = double(vec[k]);
+      dot += double(query[size_t(k)]) * v;
+      sumSquares += v * v;
+    }
+    const double len = std::sqrt(sumSquares);
+    // A row of zeros cannot happen through toRow(), but it would divide by zero
+    // here, and a zero score is the honest answer for it.
+    pool.push_back({len > 0.0 ? dot / len : 0.0, uint32_t(i)});
+  }
+  if (progress)
+    progress(total, total);
+
+  // Top N by rank, then the cap. nth_element pays for neither a full sort nor
+  // the whole vector, which matters when the library is a whole filesystem.
+  if (pool.size() > kSimilarResults) {
+    std::nth_element(pool.begin(), pool.begin() + kSimilarResults, pool.end(),
+                     [](const Scored &a, const Scored &b) {
+                       return a.score > b.score;
+                     });
+    pool.resize(kSimilarResults);
+  }
+  std::sort(pool.begin(), pool.end(), [this](const Scored &a, const Scored &b) {
+    // Ties broken by path, as in the Lookalike sort above, so an equal-scoring
+    // pair is ordered deterministically across runs.
+    if (a.score != b.score)
+      return a.score > b.score;
+    return entries_[a.entry].relPath < entries_[b.entry].relPath;
+  });
+
+  const QDir root(root_);
+  for (const Scored &s : pool) {
+    const IndexEntry &e = entries_[s.entry];
+    SearchResult r;
+    r.relPath = e.relPath;
+    r.absPath = root.absoluteFilePath(e.relPath);
+    // Cosine similarity, not a percentage. A red tulip and a green one are
+    // around 0.7-0.8 apart in this space, so printing that as "72%" reads like
+    // a weak match when it is a strong one; the score is reported as-is and the
+    // threshold control is hidden in this mode for the same reason.
+    r.score = s.score;
+    r.exact = false;
+
+    // Same guard as Lookalike: a file deleted since the cache was written has
+    // no pixels left to open.
+    if (!QFile::exists(r.absPath))
+      continue;
+
+    out.push_back(std::move(r));
+  }
+  return true;
+}
+#else
+bool ImageIndex::similarAvailable() { return false; }
+int ImageIndex::embeddedCount() const { return 0; }
+int ImageIndex::missingEmbeddingCount() const { return 0; }
+void ImageIndex::clearEmbeddings() {}
+bool ImageIndex::loadEmbeddings(const QString &) { return false; }
+bool ImageIndex::search(SearchMode, const QString &, double,
+                        std::vector<SearchResult> &, SearchProgressFn) const {
+  return false;
+}
+#endif
+
 void ImageIndex::clear() {
   root_.clear();
   entries_.clear();
   errors_ = 0;
+  embeddings_.clear();
 }
 
 } // namespace core
