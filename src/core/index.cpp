@@ -579,7 +579,12 @@ int ImageIndex::missingEmbeddingCount() const {
 void ImageIndex::clearEmbeddings() { embeddings_.clear(); }
 
 bool ImageIndex::loadEmbeddings(const QString &path) {
-  if (!embeddings_.load(path)) {
+  // The identity the current runtime and preprocessing would produce. A cache
+  // that does not match it is not loaded at all, so a Similar search can never
+  // rank against vectors from another model or another crop mode.
+  const EmbeddingCache::SourceId source{embedderModelHash(),
+                                        cropModeName(embedderCropMode())};
+  if (!embeddings_.load(path, source)) {
     // A missing or stale cache is the normal state before the first build, not
     // a failure. The next build simply writes a fresh one.
     embeddings_.clear();
@@ -607,7 +612,11 @@ bool ImageIndex::search(SearchMode mode, const QString &queryPath,
     return true;
 
   std::vector<float> query;
-  if (!sharedEmbedder().embedFile(queryPath, query))
+  // The query's mode comes from embedderQueryCropMode(), not from the mode the
+  // cache was built with: LUCIDGRASP_QUERY_CROP exists so the query can be
+  // embedded differently from the library on purpose, and the two are never
+  // confused for one another because the cache records its own.
+  if (!sharedEmbedder().embedFile(queryPath, query, embedderQueryCropMode()))
     return false;
   const int dim = int(query.size());
   if (dim <= 0)

@@ -60,6 +60,14 @@ bool EmbeddingBuilder::start(const QString &cachePath,
   embedded_ = 0;
   failed_ = 0;
 
+  // Resolved once, here, and used for every image in this run: the identity
+  // written into the header has to describe the vectors actually being
+  // produced, so the mode is a property of the job rather than something read
+  // from the environment per image.
+  const core::CropMode cropMode = embedderCropMode();
+  const EmbeddingCache::SourceId source{embedderModelHash(),
+                                       cropModeName(cropMode)};
+
   {
     // A partial cache from an earlier, cancelled run is loaded first, so the
     // already-embedded tail is skipped and the job resumes rather than starting
@@ -67,11 +75,17 @@ bool EmbeddingBuilder::start(const QString &cachePath,
     // write mode: there is nothing to append to, so the file is created fresh.
     // Appending without a loaded cache has no header to append against, which is
     // how the very first build on a machine used to refuse to start.
+    //
+    // load() is given the identity this run will write, so a cache left by a
+    // different model or a different crop mode is refused here and the build
+    // starts over rather than appending to vectors that cannot be compared with
+    // the ones it is about to add.
     std::lock_guard<std::mutex> lock(mutex_);
-    const bool resume = QFile::exists(cachePath) && cache_.load(cachePath);
+    const bool resume =
+        QFile::exists(cachePath) && cache_.load(cachePath, source);
     if (!resume)
       cache_.clear();
-    if (!cache_.beginWrite(cachePath, !resume)) {
+    if (!cache_.beginWrite(cachePath, !resume, source)) {
       error_ = cache_.lastError();
       return false;
     }
@@ -132,8 +146,10 @@ bool EmbeddingBuilder::start(const QString &cachePath,
   running_ = true;
 
   for (int t = 0; t < threads; ++t) {
-    // total by value: it is a local, and the worker outlives this frame.
-    workers_.emplace_back([this, total] {
+    // total and cropMode by value: both are locals, and the worker outlives this
+    // frame. The mode is passed explicitly rather than re-read per image, so
+    // every vector in one run provably came from the same preprocessing.
+    workers_.emplace_back([this, total, cropMode] {
       std::vector<EmbeddingRow> batch;
       batch.reserve(kCheckpointEvery);
       std::vector<float> vec;
@@ -160,7 +176,7 @@ bool EmbeddingBuilder::start(const QString &cachePath,
         if (i >= todo_.size())
           break;
 
-        if (!sharedEmbedder().embedFile(todo_[i], vec)) {
+        if (!sharedEmbedder().embedFile(todo_[i], vec, cropMode)) {
           failed_++;
         } else {
           batch.push_back(Embedder::toRow(todoHashes_[i], vec));

@@ -1,6 +1,9 @@
 #include "core/embedder.h"
 
+#include <QByteArray>
+#include <QCryptographicHash>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QStandardPaths>
 
@@ -39,6 +42,81 @@ bool embedderModelPresent() {
   // error page, so a size floor is what distinguishes "model" from "HTML that
   // was saved under the model's name".
   return info.exists() && info.isFile() && info.size() > (1 << 20);
+}
+
+QByteArray embedderModelHash() {
+  // Function-local statics, so this is computed at most once per process and
+  // the lock is uncontended in practice. Read on every cache write and every
+  // cache load otherwise, which is too often to hash 24 MB.
+  static std::mutex mutex;
+  static QByteArray cached;
+  static QString hashedPath;
+
+  std::lock_guard<std::mutex> lock(mutex);
+  const QString path = embedderModelPath();
+  if (path == hashedPath)
+    return cached;
+
+  QFile f(path);
+  QByteArray hash;
+  // Streamed rather than readAll(): the file is 24 MB and nothing here needs it
+  // all at once. An absent or unreadable model yields an empty hash, which
+  // cannot match any cache written by a readable one, so a bad path invalidates
+  // the cache instead of silently reusing it.
+  if (f.open(QIODevice::ReadOnly)) {
+    QCryptographicHash hasher(QCryptographicHash::Sha256);
+    if (hasher.addData(&f))
+      hash = hasher.result();
+    f.close();
+  }
+
+  hashedPath = path;
+  cached = hash;
+  return cached;
+}
+
+QString cropModeName(CropMode mode) {
+  switch (mode) {
+  case CropMode::Full:
+    return QStringLiteral("full");
+  case CropMode::Multi:
+    return QStringLiteral("multi");
+  case CropMode::Center:
+    break;
+  }
+  return QStringLiteral("center");
+}
+
+CropMode cropModeFromName(const QString &name) {
+  const QString lower = name.trimmed().toLower();
+  if (lower == QLatin1String("full"))
+    return CropMode::Full;
+  if (lower == QLatin1String("multi"))
+    return CropMode::Multi;
+  // Center for anything unrecognised, including the empty string: an unknown
+  // value should land on the measured configuration, not on a new one.
+  return CropMode::Center;
+}
+
+namespace {
+
+CropMode cropModeFromEnv(const char *name) {
+  return cropModeFromName(QString::fromLocal8Bit(qgetenv(name)));
+}
+
+} // namespace
+
+CropMode embedderCropMode() {
+  return cropModeFromEnv("LUCIDGRASP_CROP");
+}
+
+CropMode embedderQueryCropMode() {
+  // Only the query's own override is consulted; when it is unset the library
+  // mode applies to both, which is the single-mode configuration the cache
+  // header assumes.
+  if (qEnvironmentVariableIsEmpty("LUCIDGRASP_QUERY_CROP"))
+    return embedderCropMode();
+  return cropModeFromEnv("LUCIDGRASP_QUERY_CROP");
 }
 
 #ifdef LUCIDGRASP_HAVE_ORT
@@ -145,13 +223,14 @@ bool Embedder::load(const QString &modelPath) {
 
 bool Embedder::ready() const { return d_ && d_->session; }
 
-bool Embedder::embedImage(const QImage &image, std::vector<float> &out) {
+bool Embedder::embedImage(const QImage &image, std::vector<float> &out,
+                          CropMode mode) {
   if (!ready()) {
     setError(QStringLiteral("embedder not loaded"));
     return false;
   }
   const QImage rgb888 = image.convertToFormat(QImage::Format_RGB888);
-  if (rgb888.isNull() || rgb888.width() < kCrop || rgb888.height() < kCrop) {
+  if (rgb888.isNull()) {
     setError(QStringLiteral("cannot decode image"));
     return false;
   }
@@ -160,10 +239,11 @@ bool Embedder::embedImage(const QImage &image, std::vector<float> &out) {
   const cv::Mat bgr(rgb888.height(), rgb888.width(), CV_8UC3,
                     const_cast<uchar *>(rgb888.constScanLine(0)),
                     rgb888.bytesPerLine());
-  return embedBGR(bgr, out);
+  return embedBGR(bgr, out, mode);
 }
 
-bool Embedder::embedFile(const QString &path, std::vector<float> &out) {
+bool Embedder::embedFile(const QString &path, std::vector<float> &out,
+                         CropMode mode) {
   if (!ready()) {
     setError(QStringLiteral("embedder not loaded"));
     return false;
@@ -175,36 +255,20 @@ bool Embedder::embedFile(const QString &path, std::vector<float> &out) {
     setError(QStringLiteral("cannot decode %1").arg(path));
     return false;
   }
-  return embedBGR(bgr, out);
+  return embedBGR(bgr, out, mode);
 }
 
-bool Embedder::embedBGR(const cv::Mat &bgr, std::vector<float> &out) {
-  if (!ready()) {
-    setError(QStringLiteral("embedder not loaded"));
-    return false;
-  }
-  if (bgr.empty() || bgr.channels() != 3) {
-    setError(QStringLiteral("not a colour image"));
+bool Embedder::embedView(const cv::Mat &bgrView, std::vector<float> &out) {
+  // One 224x224 view in, one L2-normalised CLS vector out. This is the unit
+  // embedBGR composes over: Center and Full run it once, Multi six times.
+  if (bgrView.empty() || bgrView.rows != kCrop || bgrView.cols != kCrop ||
+      bgrView.channels() != 3) {
+    setError(QStringLiteral("view is not a 224x224 colour image"));
     return false;
   }
 
-  cv::Mat resized;
-  const int shortest = std::min(bgr.cols, bgr.rows);
-  if (shortest == kShortestEdge) {
-    resized = bgr;
-  } else {
-    const double scale = double(kShortestEdge) / double(shortest);
-    cv::resize(bgr, resized, cv::Size(), scale, scale, cv::INTER_CUBIC);
-  }
-  if (resized.cols < kCrop || resized.rows < kCrop) {
-    setError(QStringLiteral("image too small after resize"));
-    return false;
-  }
-  const cv::Mat crop =
-      resized(cv::Rect((resized.cols - kCrop) / 2, (resized.rows - kCrop) / 2,
-                       kCrop, kCrop));
   cv::Mat rgb;
-  cv::cvtColor(crop, rgb, cv::COLOR_BGR2RGB);
+  cv::cvtColor(bgrView, rgb, cv::COLOR_BGR2RGB);
 
   std::vector<float> input;
   toTensor(rgb, input);
@@ -253,6 +317,95 @@ bool Embedder::embedBGR(const cv::Mat &bgr, std::vector<float> &out) {
     setError(QString::fromUtf8(e.what()));
     return false;
   }
+}
+
+bool Embedder::embedBGR(const cv::Mat &bgr, std::vector<float> &out,
+                        CropMode mode) {
+  if (!ready()) {
+    setError(QStringLiteral("embedder not loaded"));
+    return false;
+  }
+  if (bgr.empty() || bgr.channels() != 3) {
+    setError(QStringLiteral("not a colour image"));
+    return false;
+  }
+
+  if (mode == CropMode::Full) {
+    // No crop and therefore no minimum size: the whole frame is squashed to
+    // 224x224 whatever its shape. INTER_CUBIC like every other resize here.
+    cv::Mat squashed;
+    cv::resize(bgr, squashed, cv::Size(kCrop, kCrop), 0, 0, cv::INTER_CUBIC);
+    return embedView(squashed, out);
+  }
+
+  // Center and Multi both work from the shortest-edge-256 resize: that is what
+  // makes a crop window 224 a consistent fraction of the frame, which is the
+  // property the measured configuration relies on.
+  cv::Mat resized;
+  const int shortest = std::min(bgr.cols, bgr.rows);
+  if (shortest == kShortestEdge) {
+    resized = bgr;
+  } else {
+    const double scale = double(kShortestEdge) / double(shortest);
+    cv::resize(bgr, resized, cv::Size(), scale, scale, cv::INTER_CUBIC);
+  }
+  if (resized.cols < kCrop || resized.rows < kCrop) {
+    setError(QStringLiteral("image too small after resize"));
+    return false;
+  }
+
+  const int dx = resized.cols - kCrop;
+  const int dy = resized.rows - kCrop;
+  if (mode == CropMode::Center) {
+    return embedView(resized(cv::Rect(dx / 2, dy / 2, kCrop, kCrop)), out);
+  }
+
+  // Multi: centre, four corners, and the squash, averaged. The corners are what
+  // rescue a subject that a centre window misses -- a tulip at the left edge of
+  // a wide garden shot is fully inside the top-left 224 window. The squash is
+  // included because it is the only view that always contains the whole frame,
+  // so it bounds what the four crops miss when the subject is diagonally
+  // between them.
+  //
+  // Averaging happens in the unit-sphere sense: each view comes back
+  // L2-normalised from embedView, so they are all directly comparable and the
+  // mean is not dominated by whichever view happened to score highest. The mean
+  // is re-normalised because averaging six unit vectors does not produce one.
+  const cv::Rect views[5] = {
+      cv::Rect(dx / 2, dy / 2, kCrop, kCrop), // centre
+      cv::Rect(0, 0, kCrop, kCrop),           // top left
+      cv::Rect(dx, 0, kCrop, kCrop),          // top right
+      cv::Rect(0, dy, kCrop, kCrop),          // bottom left
+      cv::Rect(dx, dy, kCrop, kCrop),         // bottom right
+  };
+  cv::Mat squashed;
+  cv::resize(bgr, squashed, cv::Size(kCrop, kCrop), 0, 0, cv::INTER_CUBIC);
+
+  std::vector<float> sum(size_t(kEmbeddingDim), 0.0f);
+  std::vector<float> one;
+  for (const cv::Rect &r : views) {
+    if (!embedView(resized(r), one))
+      return false;
+    for (int i = 0; i < kEmbeddingDim; ++i)
+      sum[size_t(i)] += one[size_t(i)];
+  }
+  if (!embedView(squashed, one))
+    return false;
+  for (int i = 0; i < kEmbeddingDim; ++i)
+    sum[size_t(i)] += one[size_t(i)];
+
+  double norm2 = 0.0;
+  for (const float v : sum)
+    norm2 += double(v) * v;
+  const double norm = std::sqrt(norm2);
+  if (!(norm > 0.0)) {
+    setError(QStringLiteral("degenerate embedding"));
+    return false;
+  }
+  out.assign(size_t(kEmbeddingDim), 0.0f);
+  for (int i = 0; i < kEmbeddingDim; ++i)
+    out[size_t(i)] = float(double(sum[size_t(i)]) / norm);
+  return true;
 }
 
 EmbeddingRow Embedder::toRow(uint64_t fileHash, const std::vector<float> &vec) {
@@ -311,13 +464,25 @@ bool Embedder::load(const QString &) {
 
 bool Embedder::ready() const { return false; }
 
-bool Embedder::embedFile(const QString &, std::vector<float> &out) {
+bool Embedder::embedFile(const QString &, std::vector<float> &out, CropMode) {
   setError(QStringLiteral("built without ONNX Runtime"));
   out.clear();
   return false;
 }
 
-bool Embedder::embedImage(const QImage &, std::vector<float> &out) {
+bool Embedder::embedImage(const QImage &, std::vector<float> &out, CropMode) {
+  setError(QStringLiteral("built without ONNX Runtime"));
+  out.clear();
+  return false;
+}
+
+bool Embedder::embedBGR(const cv::Mat &, std::vector<float> &out, CropMode) {
+  setError(QStringLiteral("built without ONNX Runtime"));
+  out.clear();
+  return false;
+}
+
+bool Embedder::embedView(const cv::Mat &, std::vector<float> &out) {
   setError(QStringLiteral("built without ONNX Runtime"));
   out.clear();
   return false;

@@ -25,7 +25,7 @@ void configureStream(QDataStream &s) {
 
 } // namespace
 
-bool EmbeddingCache::load(const QString &path) {
+bool EmbeddingCache::load(const QString &path, const SourceId &expected) {
     clear();
 
     QFile f(path);
@@ -43,16 +43,29 @@ bool EmbeddingCache::load(const QString &path) {
     configureStream(in);
 
     quint32 magic = 0, version = 0, storedDim = 0, storedCount = 0;
-    QString modelId;
-    in >> magic >> version >> modelId >> storedDim >> storedCount;
+    QString modelId, cropMode;
+    QByteArray modelHash;
+    in >> magic >> version >> modelId >> modelHash >> cropMode >> storedDim >>
+        storedCount;
 
     if (in.status() != QDataStream::Ok) {
         error_ = QStringLiteral("truncated header");
         clear();
         return false;
     }
-    if (magic != kMagic || version != kVersion) {
+    if (magic != kMagic) {
         error_ = QStringLiteral("not an embedding cache");
+        clear();
+        return false;
+    }
+    if (version != kVersion) {
+        // Named separately from the magic check because the two mean different
+        // things: the magic is "this is not my file", the version is "this is an
+        // older file of mine that I can no longer vouch for".
+        error_ = QStringLiteral("cache format v%1, this build writes v%2 -- "
+                                "rebuild needed")
+                     .arg(version)
+                     .arg(kVersion);
         clear();
         return false;
     }
@@ -62,6 +75,28 @@ bool EmbeddingCache::load(const QString &path) {
         clear();
         return false;
     }
+
+    // The two checks that keep unlike vectors apart. Both refuse rather than
+    // warn: a cosine between vectors from different models or different
+    // preprocessing is a confident-looking number with no meaning, and the only
+    // safe response is to rebuild.
+    if (!expected.modelHash.isEmpty() && modelHash != expected.modelHash) {
+        error_ = QStringLiteral("cache was built with a different model file "
+                                "(have %1, cache has %2) -- rebuild needed")
+                     .arg(QString::fromLatin1(expected.modelHash.toHex()))
+                     .arg(QString::fromLatin1(modelHash.toHex()));
+        clear();
+        return false;
+    }
+    if (!expected.cropMode.isEmpty() && cropMode != expected.cropMode) {
+        error_ = QStringLiteral("cache was built with crop mode '%1', this run "
+                                "uses '%2' -- rebuild needed")
+                     .arg(cropMode, expected.cropMode);
+        clear();
+        return false;
+    }
+    source_.modelHash = modelHash;
+    source_.cropMode = cropMode;
 
     const int headerBytes = int(in.device()->pos());
     // The same guard ImageIndex::load applies: a count larger than the file
@@ -100,8 +135,13 @@ bool EmbeddingCache::writeHeader() {
     QByteArray head;
     QDataStream out(&head, QIODevice::WriteOnly);
     configureStream(out);
+    // Field order is load()'s, and the hash is raw 32 bytes rather than hex so
+    // the header stays a fixed, easy-to-validate layout.
     out << kMagic << kVersion << QString::fromLatin1(kEmbeddingModelId)
-        << quint32(kEmbeddingDim) << quint32(0);
+        << source_.modelHash << source_.cropMode << quint32(kEmbeddingDim)
+        << quint32(0);
+    if (out.status() != QDataStream::Ok)
+        return false;
     headerBytes_ = int(head.size());
     countOffset_ = headerBytes_ - int(sizeof(quint32));
     if (file_->write(head) != head.size())
@@ -109,8 +149,22 @@ bool EmbeddingCache::writeHeader() {
     return file_->flush();
 }
 
-bool EmbeddingCache::beginWrite(const QString &path, bool reset) {
+bool EmbeddingCache::beginWrite(const QString &path, bool reset,
+                                const SourceId &source) {
     endWrite();
+
+    // Set before writeHeader() for the same reason file_ is: the header write
+    // reads it, so assigning it afterwards would record an empty identity and
+    // produce a cache that rejects itself on the next load.
+    source_ = source;
+    if (source_.modelHash.isEmpty()) {
+        // A cache with no recorded model cannot be checked later, so writing one
+        // would create exactly the untraceable file this header exists to
+        // prevent. Refused loudly instead of quietly.
+        error_ = QStringLiteral("refusing to write a cache with no model hash");
+        source_ = SourceId();
+        return false;
+    }
 
     QDir().mkpath(QFileInfo(path).absolutePath());
     auto f = std::make_unique<QFile>(path);
@@ -257,6 +311,7 @@ void EmbeddingCache::clear() {
     countOffset_ = 0;
     blob_.clear();
     rows_.clear();
+    source_ = SourceId();
 }
 
 } // namespace core
