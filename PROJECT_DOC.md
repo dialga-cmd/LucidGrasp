@@ -52,6 +52,22 @@ This release is three things: a new feature, a correctness sweep through the sea
 
 **The version string had three independent copies** — `CMakeLists.txt`, `main.cpp` and `installer.iss` — which is the exact drift that makes an update checker report a phantom update forever. There is now one source.
 
+### 1.3 Surface Scan and API-Key Entry (in progress)
+
+The next feature is a **surface scan**: given an image the user has selected, find where that image or a visually similar one appears across the open web. It is only partly built. What exists on `feature/surface-search` is the **bring-your-own-key platform** — the local page where a user connects their own provider accounts. The provider search calls that would turn a selection into results are not written yet, so nothing in this section reaches a search endpoint except the one-shot validation probes described below.
+
+The decision that shapes everything else is that the user brings their own key and the application ships **no secret at all**. There is no bundled key, no shared proxy and no LucidGrasp account. That removes a whole class of problems — a leaked binary leaks nothing, and there is no server to pay for or rate-limit — but it means the app has to accept, store and validate arbitrary third-party credentials, which is the entire job of this release.
+
+Three pieces carry it. `SecretStore` is layered storage with a fixed precedence: an environment variable (`LUCIDGRASP_KEY_<PROVIDER>`, read-only), then the OS keychain, then a private INI file written owner-only on Unix. The environment layer is a test and power-user override; the keychain layer is best-effort and only used when its helper is present, falling through to the file rather than failing; the file is the guaranteed fallback. The security boundary is the process, not the page: the browser is never handed a key, only a mask, and the store is the only consumer.
+
+`providers.cpp` is a pure-data registry of the **eleven** platforms that are self-serve and grant recurring credits, in the order the page shows them: the official reverse-image services (Google Cloud Vision Web Detection, SauceNAO, trace.moe), the third-party reverse proxies (SerpApi, Zenserp), and the keyword/general vendors used only after the image-to-keyword bridge (HasData, ScraperAPI, Scrape.do, ZenRows, Outscraper, Serpstack). Each entry carries its display name, category, one-line description, signup URL and a beginner walkthrough. The strict inclusion rule — self-serve from the vendor's own site **and** a monthly/daily/hourly free allowance — is documented with its exclusions in `image - surface scan plan.md` §9.
+
+`KeyEntryServer` serves the page on an OS-assigned loopback port and answers its JSON calls. Validation runs here, in C++, never in the page, so the browser never has to be trusted with a key and a key never crosses into JavaScript beyond the box the user typed it into. Because anything on the machine and any page in the browser can reach `127.0.0.1`, three things keep that from being enough: the server binds to loopback only and dies with the app; every request must carry a random per-session token that the page reads from the URL the app opened itself; and `Host` must be the loopback authority while `Origin`, when present, must match it, which stops a foreign page from driving the server. Token comparison is length-independent, so a wrong guess costs the same as a wrong near-miss.
+
+The page is a single self-contained HTML string (`key_entry_page.h`) with no external requests at all — its content-security policy is `default-src 'none'` — so it works offline and leaks nothing. It is laid out as a grid of self-contained provider cards in both a light and a dark theme, and each card carries its own key field, Validate button, step-by-step "How to get a key" guide and result line. Validation is a real signed call to the provider: Cloud Vision annotates a 1×1 probe image, SauceNAO hits `search.php`, trace.moe is probed through `GET /me` (its `/search` is POST-only, so a `GET` there would only ever return `405`; an optional donor key goes in the `x-trace-key` header), and the rest hit their account or status endpoint. Sync commits every non-empty box, not just the ones that need a key, so a donor key for the keyless trace.moe is stored like any other; then the server emits `keysChanged` and the window refreshes its enabled state.
+
+`KeyEntryDialog` exists to make the invisible visible. Tapping the menu does not silently open a server and a tab: the user is first told that a local server will start, then sees a "Starting…" state, and only then is the browser opened — exactly once. A second tap raises the same dialog instead of starting a second server or opening a second tab. The dialog is owned by the window; the listener is parented to the window, so it lives exactly as long as the app.
+
 ## Current Architecture
 
 ### Build System
@@ -59,7 +75,7 @@ This release is three things: a new feature, a correctness sweep through the sea
 The project uses CMake (minimum version 3.16) with C++17. Three external libraries are required:
 
     Qt6 Widgets for the graphical interface
-    Qt6 Network for the update check (ships in qt6-base-dev; windeployqt bundles the DLL)
+    Qt6 Network for the update check and the local surface-scan key server (ships in qt6-base-dev; windeployqt bundles the DLL)
     OpenCV for computer vision and pixel analysis
     pthreads for background indexing (Linux only, Windows uses native threads)
 
@@ -78,6 +94,16 @@ The CMakeLists.txt includes platform specific sections. On Windows, it appends a
     src/ui/mainwindow.h and mainwindow.cpp implement the Qt6 graphical interface including the library browser, query image selector, threshold control, progress bar, results grid, theme derivation, menu bar, and the update notice.
 
     src/app/update_checker.h and update_checker.cpp hold the release check and everything it needs to be testable without a network: version comparison and payload parsing are free functions, the preferences sit behind a small class over `QSettings`, and only the class that owns the `QNetworkAccessManager` touches the network.
+
+    src/app/secret_store.h and secret_store.cpp hold the layered surface-scan key storage (environment > OS keychain > owner-only INI) and the mask helper. The security boundary is the process: the browser only ever sees a mask.
+
+    src/app/providers.h and providers.cpp are the pure-data registry of the eleven supported surface-scan platforms, including the beginner walkthrough each card shows.
+
+    src/app/key_entry_server.h and key_entry_server.cpp serve the loopback key page, validate keys server-side, and write keys through the store. The request parser, token comparison and loopback-host check are pure functions so the self-test can drive them without a socket.
+
+    src/app/key_entry_page.h is the entire key-entry page as one embedded HTML string, with no external requests.
+
+    src/ui/key_entry_dialog.h and key_entry_dialog.cpp are the confirmation and status window that asks before starting the local server, shows a busy state while it starts, and opens the browser exactly once.
 
 ### How the Matching Engine Works
 
@@ -178,6 +204,26 @@ Indexing runs on a background thread and reports progress back to the UI through
 
 Search also runs on a background thread, with progress reporting and a working Stop button, and the UI stays responsive throughout. While a search is in flight the inputs that would invalidate the in-memory index are disabled, since the worker reads the index directly rather than working on a copy. The File menu's library and query actions are part of that gate too: through 1.2 they stayed live during a search -- Ctrl+I reached `browseLibrary()` and replaced the index vector underneath the worker, a use-after-free that only shows up under a load and a sufficiently long query -- they are now stored as members and toggled in `updateActions()` alongside the buttons, with the same guards on the handler slots. Stage one of the search (the in-memory prefilter over the whole index) also consults the cancellation callback now, so Stop works during the first pass on a whole-filesystem index instead of only once decoding starts. And when ORB is silent on *both* images because neither yielded a keypoint, its 35% share is renormalised away rather than counted as dissimilarity: a byte-identical pair of smooth, gradient-only images used to cap at 0.72 while a textured pair reached 1.0, which made the user's threshold mean different things on different libraries.
 
+### Surface Scan and API-Key Entry
+
+The surface scan is entered from **Internet → Surface Scan — API Keys…**. The menu action opens a confirmation dialog and, once confirmed, a loopback HTTP server that serves the key-entry page to the default browser.
+
+The flow is: the user pastes a key into a provider card and clicks **Validate**. The browser calls `POST /api/validate` on the local server, which makes a real request to the provider (see the probe table below) and reports back a pass/fail line. Validate stores nothing. Clicking **Sync** posts every non-empty field to `POST /api/sync`, which writes the keys through `SecretStore` and emits `keysChanged`; the window then recomputes which providers are enabled. `POST /api/remove` deletes a stored key, and `GET /api/state` returns the masked state the page renders from. The page is stateless: it re-reads `/api/state` on every load, so it always reflects the store rather than anything it cached.
+
+Key storage is layered, and the precedence is resolved once inside `SecretStore::load` so no caller can read a lower layer first:
+
+    environment  >  OS keychain  >  private INI file
+
+`LUCIDGRASP_KEY_<PROVIDER>` is a read-only override for tests and power users; the keychain is consulted only when its helper tool exists and a failed write falls through; the INI file (under the per-user config directory, owner-only on Unix) is the guaranteed fallback. `mask` never returns the full key. The page shows the mask and which backend supplied it, so a user can tell an environment override from a keychain hit from the file.
+
+Validation probes are one-shot and cheap, chosen to prove the credential works without doing real work. Cloud Vision annotates a 1×1 PNG with `LABEL_DETECTION` (one billable unit); SauceNAO calls `search.php`; trace.moe is probed with `GET /me`, which is anonymous-safe and returns the quota — its `/search` endpoint is POST-only, and an invalid optional key in `x-trace-key` returns `403`. The remaining vendors are probed against their account or status endpoint; ZenRows and Scrape.do are the least certain of the set and would be the first to need adjusting if a vendor changes its API.
+
+The server's threat model is that `127.0.0.1` is reachable by anything on the machine and any page in the browser. It binds to loopback only and stops with the app; requires a random per-session token on every request (the page reads it from the URL the app opened); and requires `Host` to be the loopback authority and `Origin`, when present, to match. `parseRequest`, `constantTimeEquals` and `hostIsLoopback` are pure functions so the self-test exercises them without a socket.
+
+The page itself is one embedded string and makes no external requests; its CSP is `default-src 'none'` with only inline style and script and `connect-src 'self'`. No fonts, scripts or images are fetched from anywhere, which is what keeps it offline-capable and free of third-party leakage.
+
+Not yet built: the provider search calls (`search(image)`) that turn a selected image into results, and the image-to-keyword bridge that feeds the keyword-only vendors. Until those exist, the app stores and validates keys but does not scan.
+
 ### A Note on the Performance Table
 
 The table under Two-Stage Search was written in 1.1 and attributes the shortlist cap to that release. The cap was not in fact present in the 1.1 binary, so those figures describe the intended design rather than a measurement of the shipped 1.1 build, and 1.2 has not been re-measured against 1.0 either. Treat the 1.0 column as the only verified figure until someone repeats the measurement on both binaries.
@@ -212,7 +258,7 @@ The indexing system has been tested and confirmed to work correctly on directori
 
 The matching engine has been tested with both raw and edited versions of photographs. Tests included an abandoned building photograph with a heavy teal/cyan color grade applied, and a portrait photograph with shadow crushing and color tone adjustments. In both cases, the edited version was correctly identified as a match. The portrait test returned 100% for the edited image and 50% for the raw version against a directory of 10 mixed images.
 
-`--selftest` runs eight cases with no network access at all, in CI on both platforms, so the update checker's behaviour is verified without spending anyone's rate limit: version comparison across 22 valid and malformed tag pairs, all of which have to resolve to silence when they are unreadable; parsing of one real-shaped payload and ten malformed ones, which must be refused without writing to the output; and a round trip of the opt-out, the per-version mute, and the daily throttle against a scratch settings directory. The live endpoint was exercised separately against the real API at three reported versions — current, older, and newer than any release — and the last of those produced no notice, which is the case that would otherwise have gone unnoticed.
+`--selftest` runs ten cases with no network access at all, in CI on both platforms. The image-matching cases build a synthetic corpus and check that edited and rescaled copies rank above unrelated distractors; the update-checker cases compare 22 valid and malformed tag pairs (all of which must resolve to silence when unreadable), parse one real-shaped payload and ten malformed ones (which must be refused without writing to the output), and round-trip the opt-out, the per-version mute and the daily throttle against a scratch settings directory. Case 10 covers the surface-scan key layer without touching a real keyring: a key round-trips, the mask never equals the key, the environment override wins and cannot be removed, the file is owner-only on Unix, the eleven-provider registry has unique ids, and the loopback request parser, token comparison and host check behave. The live endpoint was exercised separately against the real API at three reported versions — current, older, and newer than any release — and the last of those produced no notice, which is the case that would otherwise have gone unnoticed.
 
 ## Known Issues
 
@@ -225,4 +271,6 @@ There is a deliberate recall trade-off in the prefilter. It ranks on pHash, dHas
 A second, genuinely fatal bug was found and fixed at the same time. `ImageIndex::load` read an entry count straight out of the cache file and used it to resize a vector with no validation, so a corrupt or truncated file caused an enormous allocation and an unhandled `std::bad_alloc`. Verified by taking a valid 1,642 byte index, overwriting its count field with 0x7FFFFFF0, and loading it: the 1.0 binary aborts with `terminate called after throwing an instance of 'std::bad_alloc'` and dumps core, while 1.1 rejects the file and rebuilds. This is a plausible explanation for reports of the application failing to start, because a cache truncated by an earlier crash or a full disk persists and would abort every subsequent launch. `load` now cross-checks the declared count against the file size, since each entry needs at least a path, three hashes, and a 256 byte histogram.
 
 Scanning a whole filesystem is now practical but not free. Indexing 364,505 files discovered on a typical Linux root filesystem takes on the order of an hour on spinning storage, and the resulting index file is a few hundred megabytes. The discovery phase reports an indeterminate progress bar because the total is not known until the walk finishes, which can itself take several minutes on a cold cache.
+
+The surface scan is not finished. `feature/surface-search` ships the key-entry platform — storage, validation, the local server and the page — but not the provider search calls that would turn a selected image into results, nor the image-to-keyword bridge for the keyword-only vendors. Until those land, the feature can connect and verify accounts but cannot scan. The ZenRows and Scrape.do validation probes are also the least certain of the set and would be the first to need adjustment if either vendor changes its API.
 
