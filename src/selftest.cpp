@@ -1,5 +1,8 @@
 #include "selftest.h"
 
+#include "app/key_entry_server.h"
+#include "app/providers.h"
+#include "app/secret_store.h"
 #include "app/update_checker.h"
 #include "core/features.h"
 #include "core/index.h"
@@ -7,6 +10,7 @@
 #include <cstdio>
 #include <vector>
 
+#include <QByteArray>
 #include <QColor>
 #include <QDateTime>
 #include <QDir>
@@ -17,6 +21,7 @@
 #include <QPainter>
 #include <QPen>
 #include <QRectF>
+#include <QSet>
 #include <QSettings>
 
 namespace {
@@ -626,6 +631,149 @@ int runSelfTest()
                 std::printf("PASS: original and graded edit clear the default "
                             "50%% threshold\n\n");
             }
+        }
+    }
+
+    // --- Case 10: surface-scan key storage and request parsing -------------
+    {
+        std::printf("Case 10 — provider keys and loopback request parsing:\n");
+        int caseFailures = 0;
+        auto require = [&caseFailures](bool cond, const char* what) {
+            if (!cond) {
+                std::printf("  FAIL: %s\n", what);
+                ++caseFailures;
+            }
+        };
+
+        const QString keyPath =
+            base + QStringLiteral("/secrets/providers.ini");
+        app::SecretStore store(keyPath);
+        store.setKeychainEnabled(false);  // never touch a real keyring in tests
+
+        require(!store.load(QStringLiteral("serpapi")).found(),
+                "a fresh store should hold nothing");
+        require(store.save(QStringLiteral("serpapi"),
+                           QStringLiteral("abcdefgh12345678")),
+                "saving a key should succeed");
+        const app::StoredSecret loaded = store.load(QStringLiteral("serpapi"));
+        require(loaded.found()
+                    && loaded.value == QStringLiteral("abcdefgh12345678"),
+                "the saved key should round-trip");
+        require(loaded.backend == app::SecretBackend::Settings,
+                "with the keychain off the key should come from the file");
+        require(app::SecretStore::mask(loaded.value)
+                    == QStringLiteral("••••••••5678"),
+                "the mask should show only the tail");
+        require(app::SecretStore::mask(loaded.value) != loaded.value,
+                "the mask must never equal the key");
+
+        // Environment wins over the file, and is read-only.
+        const QByteArray envName =
+            app::SecretStore::environmentVariable(QStringLiteral("serpapi"))
+                .toUtf8();
+        qputenv(envName.constData(), QByteArrayLiteral("from-environment"));
+        const app::StoredSecret overridden = store.load(QStringLiteral("serpapi"));
+        require(overridden.backend == app::SecretBackend::Environment
+                    && overridden.value == QStringLiteral("from-environment"),
+                "an environment variable should take precedence");
+        require(store.remove(QStringLiteral("serpapi")),
+                "remove should report success");
+        require(store.load(QStringLiteral("serpapi")).backend
+                    == app::SecretBackend::Environment,
+                "an environment override cannot be removed");
+        qunsetenv(envName.constData());
+        require(!store.load(QStringLiteral("serpapi")).found(),
+                "removing should clear the stored key");
+
+#if defined(Q_OS_UNIX)
+        store.save(QStringLiteral("zenserp"),
+                   QStringLiteral("another-secret-value"));
+        const QFile::Permissions perms = QFile::permissions(keyPath);
+        require(!(perms & QFileDevice::ReadGroup)
+                    && !(perms & QFileDevice::ReadOther)
+                    && !(perms & QFileDevice::WriteGroup)
+                    && !(perms & QFileDevice::WriteOther),
+                "the secrets file should be owner-only");
+#endif
+
+        // Provider registry: unique ids, and the count the plan documents.
+        const QVector<app::Provider>& all = app::providers();
+        QSet<QString> ids;
+        bool everyFielded = true;
+        for (const app::Provider& p : all) {
+            ids.insert(p.id);
+            if (p.id.isEmpty() || p.name.isEmpty() || p.category.isEmpty()
+                || p.validator.isEmpty())
+                everyFielded = false;
+        }
+        require(all.size() == 11,
+                "the registry should hold the 11 kept providers");
+        require(ids.size() == all.size(), "provider ids should be unique");
+        require(everyFielded,
+                "every provider needs an id, name, category and validator");
+        const app::Provider* trace = app::providerById(QStringLiteral("trace_moe"));
+        require(trace != nullptr && !trace->needsKey,
+                "trace.moe needs no key");
+        require(app::providerById(QStringLiteral("nope")) == nullptr,
+                "an unknown provider id should resolve to null");
+
+        // Request parsing, host check and token comparison.
+        app::KeyEntryServer::Request req;
+        QString perr;
+        const QByteArray raw =
+            "POST /api/validate?token=abc HTTP/1.1\r\n"
+            "Host: 127.0.0.1:45000\r\n"
+            "Content-Length: 7\r\n"
+            "X-LucidGrasp-Token: abc\r\n"
+            "\r\n"
+            "{\"a\":1}";
+        require(app::KeyEntryServer::parseRequest(raw, &req, &perr),
+                "a well-formed request should parse");
+        require(req.method == QByteArrayLiteral("POST")
+                    && req.path == QByteArrayLiteral("/api/validate")
+                    && req.query == QByteArrayLiteral("token=abc")
+                    && req.body == QByteArrayLiteral("{\"a\":1}"),
+                "method, path, query and body should split correctly");
+        require(req.headers.value("host")
+                    == QByteArrayLiteral("127.0.0.1:45000"),
+                "headers should be lower-cased and trimmed");
+        app::KeyEntryServer::Request bad;
+        QString badError;
+        require(!app::KeyEntryServer::parseRequest(QByteArrayLiteral("nonsense"),
+                                                   &bad, &badError),
+                "a request without a header terminator should be refused");
+
+        require(app::KeyEntryServer::constantTimeEquals(
+                    QByteArrayLiteral("abc"), QByteArrayLiteral("abc")),
+                "equal tokens should compare equal");
+        require(!app::KeyEntryServer::constantTimeEquals(
+                    QByteArrayLiteral("abc"), QByteArrayLiteral("abd")),
+                "different tokens should not compare equal");
+        require(!app::KeyEntryServer::constantTimeEquals(
+                    QByteArrayLiteral("abc"), QByteArrayLiteral("abcd")),
+                "different-length tokens should not compare equal");
+
+        require(app::KeyEntryServer::hostIsLoopback(
+                    QByteArrayLiteral("127.0.0.1:5000"), 5000),
+                "loopback v4 with our port should be allowed");
+        require(app::KeyEntryServer::hostIsLoopback(
+                    QByteArrayLiteral("localhost:5000"), 5000),
+                "localhost with our port should be allowed");
+        require(!app::KeyEntryServer::hostIsLoopback(
+                    QByteArrayLiteral("evil.example:5000"), 5000),
+                "a foreign host should be refused");
+        require(!app::KeyEntryServer::hostIsLoopback(
+                    QByteArrayLiteral("127.0.0.1:6000"), 5000),
+                "a mismatched port should be refused");
+        require(!app::KeyEntryServer::hostIsLoopback(QByteArray(), 5000),
+                "an empty host should be refused");
+
+        if (caseFailures) {
+            std::printf("FAIL: %d surface-scan check(s) wrong\n\n", caseFailures);
+            ++failures;
+        } else {
+            std::printf("PASS: keys round-trip, masks hide the value, "
+                        "requests parse\n\n");
         }
     }
 

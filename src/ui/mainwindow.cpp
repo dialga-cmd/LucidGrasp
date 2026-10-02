@@ -1,5 +1,7 @@
 #include "ui/mainwindow.h"
 
+#include "ui/key_entry_dialog.h"
+
 #include <QAbstractButton>
 #include <QAction>
 #include <QColor>
@@ -419,6 +421,10 @@ MainWindow::MainWindow(QWidget *parent)
   connect(updates_, &app::UpdateChecker::finished, this,
           &MainWindow::onUpdateCheckFinished);
 
+  // Parented to the window, so the loopback listener lives exactly as long as
+  // the app and is torn down with it.
+  keyServer_ = new app::KeyEntryServer(&secrets_, this);
+
   buildMenus();
 
   // Seed the initial theme from the desktop, then hand over to the toggle.
@@ -464,6 +470,13 @@ void MainWindow::buildMenus() {
   quitAction->setShortcut(QKeySequence::Quit);
   connect(quitAction, &QAction::triggered, this, &QWidget::close);
 
+  // Internet is the surface-scan entry point. The keys themselves live in the
+  // browser page the action opens; this menu is just the door.
+  QMenu *internet = bar->addMenu(tr("&Internet"));
+  QAction *keysAction =
+      internet->addAction(tr("Surface Scan — API &Keys..."));
+  connect(keysAction, &QAction::triggered, this, &MainWindow::openKeyEntry);
+
   // Help is where the update check lives, and that is the reason this menu
   // exists. The dialog offers a permanent opt-out, so there has to be a way to
   // take it back: without a permanent entry point, "never check for updates"
@@ -485,6 +498,14 @@ void MainWindow::buildMenus() {
   connect(autoUpdateAction_, &QAction::toggled, this, [this](bool on) {
     updates_->setDisabled(!on);
   });
+}
+
+void MainWindow::openKeyEntry() {
+  // One dialog for the whole session: a second tap raises it rather than
+  // starting a second server or opening another browser tab.
+  if (!keyEntryDialog_)
+    keyEntryDialog_ = new KeyEntryDialog(keyServer_, this);
+  keyEntryDialog_->prompt();
 }
 
 void MainWindow::showUpdateDialog(const QString &tag, const QString &url,

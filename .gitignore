@@ -24,6 +24,13 @@ Makefile
 # Application data
 .image_search_index.bin
 
+# Local secrets for the surface-scan providers (never commit API keys)
+.env
+*.env
+providers.ini
+secrets.ini
+*.key
+
 # Brag video output
 brag-output/
 
