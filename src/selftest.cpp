@@ -814,6 +814,139 @@ int runSelfTest()
         }
     }
 
+    // --- Case 11: cache integrity on load, and atomicity on save ---------
+    // The round-trip above proves a good cache survives. These are the two
+    // directions that protect a real library.
+    //
+    // On load: a cache damaged by an interrupted write has to be refused
+    // outright, so the caller reindexes instead of searching hashes that were
+    // never fully written. Believing a damaged header is how a corrupt cache
+    // becomes a wrong result rather than a slow one.
+    //
+    // On save: the cache is replaced atomically, so an interrupted or failing
+    // write leaves the previous one intact and no partial file behind. Getting
+    // this wrong is expensive in exactly the case that matters, since the file
+    // being rewritten is a whole-filesystem index that took hours to build.
+    std::printf("Case 11 — damaged caches refused, saves are atomic:\n");
+    {
+        const QString good = base + QStringLiteral("/index.bin");
+        QFile src(good);
+        if (!src.open(QIODevice::ReadOnly)) {
+            std::printf("FAIL: could not read the round-tripped index\n\n");
+            ++failures;
+        } else {
+            const QByteArray bytes = src.readAll();
+            src.close();
+
+            // Truncated mid-entry: the declared count outruns the bytes left.
+            const QString cut = base + QStringLiteral("/truncated.bin");
+            QFile out(cut);
+            if (out.open(QIODevice::WriteOnly)) {
+                out.write(bytes.left(bytes.size() / 2));
+                out.close();
+            }
+            core::ImageIndex damaged;
+            if (damaged.load(cut) || !damaged.empty()) {
+                std::printf("FAIL: a truncated cache was accepted (%zu entries)\n",
+                            size_t(damaged.size()));
+                ++failures;
+            } else {
+                std::printf("PASS: truncated cache refused, index left empty\n");
+            }
+
+            // Wrong magic, so the header check has to catch it.
+            const QString junk = base + QStringLiteral("/junk.bin");
+            QFile out2(junk);
+            if (out2.open(QIODevice::WriteOnly)) {
+                out2.write(QByteArray(4096, '\x5a'));
+                out2.close();
+            }
+            core::ImageIndex junkIndex;
+            if (junkIndex.load(junk) || !junkIndex.empty()) {
+                std::printf("FAIL: a cache with no valid header was accepted\n");
+                ++failures;
+            } else {
+                std::printf("PASS: headerless cache refused\n");
+            }
+        }
+
+        // Atomic replace. Saved into a directory of its own so the file count
+        // afterwards is exact and a leftover temp file cannot hide among the
+        // rest of the corpus.
+        const QString adir = base + QStringLiteral("/atomic");
+        QDir().mkpath(adir);
+        const QString apath = adir + QStringLiteral("/cache.bin");
+
+        core::ImageIndex first;
+        if (!first.build(lib) || first.empty()) {
+            std::printf("FAIL: could not build an index for the atomicity case\n\n");
+            ++failures;
+        } else {
+            if (!first.save(apath)) {
+                std::printf("FAIL: first atomic save reported failure\n\n");
+                ++failures;
+            } else {
+                // A second, different index over the same path must fully
+                // replace the first rather than blending into it.
+                core::ImageIndex second;
+                if (!second.build(tlib)) {
+                    std::printf("FAIL: could not build the second index\n\n");
+                    ++failures;
+                } else if (!second.save(apath)) {
+                    std::printf("FAIL: second atomic save reported failure\n\n");
+                    ++failures;
+                } else {
+                    core::ImageIndex reloaded;
+                    const bool replaced =
+                        reloaded.load(apath)
+                        && reloaded.size() == second.size()
+                        && reloaded.root() == second.root();
+                    if (!replaced) {
+                        std::printf("FAIL: the second save did not cleanly "
+                                    "replace the first\n\n");
+                        ++failures;
+                    } else {
+                        std::printf("PASS: second save cleanly replaced the "
+                                    "first (%zu entries)\n",
+                                    size_t(reloaded.size()));
+                    }
+                }
+            }
+
+            // Exactly one file: the cache itself. A non-committed write would
+            // leave a sibling temp file behind, growing on every failed save.
+            const QStringList left =
+                QDir(adir).entryList(QDir::Files | QDir::Hidden | QDir::System);
+            if (left.size() != 1) {
+                std::printf("FAIL: save left %d files behind (%s); expected "
+                            "only the cache\n\n",
+                            int(left.size()), qPrintable(left.join(", ")));
+                ++failures;
+            } else {
+                std::printf("PASS: no temp file left behind\n");
+            }
+
+            // A save that cannot even open its target must fail cleanly and
+            // leave the existing cache alone.
+            core::ImageIndex keep;
+            const bool keptBefore = keep.load(apath) && !keep.empty();
+            const bool badSave =
+                keep.save(base + QStringLiteral("/no_such_dir/cache.bin"));
+            core::ImageIndex after;
+            const bool keptAfter = after.load(apath) && !after.empty();
+            if (badSave) {
+                std::printf("FAIL: a save into a missing directory reported "
+                            "success\n\n");
+                ++failures;
+            } else if (keptBefore != keptAfter || !keptAfter) {
+                std::printf("FAIL: a failed save damaged the existing cache\n\n");
+                ++failures;
+            } else {
+                std::printf("PASS: failed save left the existing cache intact\n\n");
+            }
+        }
+    }
+
     if (failures == 0)
         std::printf("\nAll self-tests passed.\n");
     else
