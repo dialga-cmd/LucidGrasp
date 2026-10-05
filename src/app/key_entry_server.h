@@ -8,6 +8,7 @@
 class QNetworkAccessManager;
 class QTcpServer;
 class QTcpSocket;
+class QTimer;
 
 namespace app {
 
@@ -75,6 +76,9 @@ private:
     void onNewConnection();
     void onReadyRead(QTcpSocket* socket);
     void dispatch(QTcpSocket* socket, const Request& req);
+    // Arms the idle timer for a socket, restarting the window. Called on accept
+    // and again on every readyRead.
+    void armIdleTimer(QTcpSocket* socket);
 
     void sendResponse(QTcpSocket* socket, int status,
                       const QByteArray& contentType, const QByteArray& body);
@@ -96,6 +100,12 @@ private:
     QByteArray token_;
     quint16 port_ = 0;
     QHash<QTcpSocket*, QByteArray> buffers_;
+    // Per-socket idle deadline. A listening socket with no timeout holds every
+    // connection that arrives until the client itself gives up, so a page left
+    // open in a background tab -- or anything else on the machine that opens a
+    // socket and says nothing -- would otherwise pin a descriptor for the life
+    // of the app. Keyed the same way as buffers_, and dropped with it.
+    QHash<QTcpSocket*, QTimer*> idleTimers_;
 };
 
 }  // namespace app

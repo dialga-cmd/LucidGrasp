@@ -1,9 +1,15 @@
 #include "app/secret_store.h"
 
+#include "app/providers.h"
+
+#include <thread>
+
 #include <QByteArray>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QMutex>
+#include <QMutexLocker>
 #include <QProcess>
 #include <QSettings>
 #include <QStandardPaths>
@@ -94,18 +100,56 @@ bool SecretStore::hasValue(const QString& key)
     return !key.trimmed().isEmpty();
 }
 
+StoredSecret SecretStore::cachedOrLoad(const QString& providerId) const
+{
+    // The environment layer is checked ahead of the cache, every time. An
+    // override is the thing a user or a CI run flips at will, so it must never
+    // go stale behind a value cached a moment ago, and it must never be cached
+    // itself -- a cached override would outlive the variable and survive being
+    // unset. Two reasons to keep it out of cache_ entirely.
+    const StoredSecret env = environmentOverride(providerId);
+    if (env.found())
+        return env;
+
+    // The two persistent layers. A hit here is what keeps a request handler off
+    // the helper program, and the preload is what puts the entries there in the
+    // first place -- see preloadAsync().
+    {
+        QMutexLocker lock(&cacheMutex_);
+        if (cache_.contains(providerId))
+            return cache_.value(providerId);
+    }
+
+    const StoredSecret secret = resolvePersistent(providerId);
+    cacheStore(providerId, secret);
+    return secret;
+}
+
 StoredSecret SecretStore::load(const QString& providerId) const
 {
     if (providerId.isEmpty())
         return {};
+    return cachedOrLoad(providerId);
+}
 
-    const QString env = environmentVariable(providerId);
-    if (qEnvironmentVariableIsSet(env.toUtf8().constData())) {
-        const QString value = qEnvironmentVariable(env.toUtf8().constData());
-        if (!value.isEmpty())
-            return {value, SecretBackend::Environment};
-    }
+// The read-only override layer, in one place. Deliberately not folded into
+// resolvePersistent(): the two have different caching rules, and folding them
+// together is exactly how an override ends up behind a cached file value.
+StoredSecret SecretStore::environmentOverride(const QString& providerId) const
+{
+    const QByteArray env = environmentVariable(providerId).toUtf8();
+    if (!qEnvironmentVariableIsSet(env.constData()))
+        return {};
+    const QString value = qEnvironmentVariable(env.constData());
+    if (value.isEmpty())
+        return {};
+    return {value, SecretBackend::Environment};
+}
 
+// The two cached layers, keychain over INI. Used by the cache-miss path and by
+// the preload thread alike, so the precedence between them cannot drift.
+StoredSecret SecretStore::resolvePersistent(const QString& providerId) const
+{
     if (keychainEnabled_ && keychainAvailable()) {
         QString value;
         if (keychainLoad(providerId, &value) && !value.isEmpty())
@@ -115,16 +159,64 @@ StoredSecret SecretStore::load(const QString& providerId) const
     return iniLoad(providerId);
 }
 
+void SecretStore::cacheStore(const QString& providerId,
+                             const StoredSecret& secret) const
+{
+    QMutexLocker lock(&cacheMutex_);
+    cache_.insert(providerId, secret);
+}
+
+void SecretStore::cacheForget(const QString& providerId) const
+{
+    QMutexLocker lock(&cacheMutex_);
+    cache_.remove(providerId);
+}
+
+SecretStore::~SecretStore()
+{
+    preloadCancelled_.store(true);
+    if (preloadThread_.joinable())
+        preloadThread_.join();
+}
+
+void SecretStore::preloadAsync()
+{
+    // One warm-up at a time. Starting a second thread would just race the first
+    // one into the same cache, and the second would win the race to be joined
+    // at shutdown while the first kept reading members already gone.
+    if (preloadThread_.joinable())
+        return;
+
+    preloadCancelled_.store(false);
+    preloadThread_ = std::thread([this] {
+        for (const Provider& provider : providers()) {
+            if (preloadCancelled_.load())
+                return;
+            cacheStore(provider.id, resolvePersistent(provider.id));
+        }
+    });
+}
+
 bool SecretStore::save(const QString& providerId, const QString& key)
 {
+    // Mutates the cache, so it is written here rather than through the const
+    // accessors; load() stays const because resolving a secret does not.
     if (providerId.isEmpty() || !hasValue(key))
         return false;
 
+    // Whatever layer takes it, the cache is updated here rather than being
+    // invalidated: re-resolving would put a helper-program round trip straight
+    // back onto the GUI thread that this cache exists to keep clear.
     if (keychainEnabled_ && keychainAvailable()
-        && keychainSave(providerId, key))
+        && keychainSave(providerId, key)) {
+        cacheStore(providerId, StoredSecret{key, SecretBackend::Keychain});
         return true;
+    }
 
-    return iniSave(providerId, key);
+    if (!iniSave(providerId, key))
+        return false;
+    cacheStore(providerId, StoredSecret{key, SecretBackend::Settings});
+    return true;
 }
 
 bool SecretStore::remove(const QString& providerId)
@@ -135,6 +227,7 @@ bool SecretStore::remove(const QString& providerId)
     if (keychainEnabled_ && keychainAvailable())
         keychainRemove(providerId);  // best effort; the file layer still runs
 
+    cacheForget(providerId);
     return iniRemove(providerId);
 }
 
@@ -142,6 +235,13 @@ bool SecretStore::remove(const QString& providerId)
 
 bool SecretStore::iniSave(const QString& providerId, const QString& key)
 {
+    // Serialises the whole INI layer. QSettings keeps per-file state, and two
+    // threads opening the same file interleave their writes -- a lost update on
+    // a user's key file is not a tolerable outcome for a performance tweak, so
+    // this lock is not optional now that preloadAsync() reads the file from a
+    // worker thread.
+    QMutexLocker lock(&iniMutex_);
+
     const QString dir = QFileInfo(iniPath_).absolutePath();
     if (!QDir().mkpath(dir))
         return false;
@@ -158,6 +258,8 @@ bool SecretStore::iniSave(const QString& providerId, const QString& key)
 
 StoredSecret SecretStore::iniLoad(const QString& providerId) const
 {
+    QMutexLocker lock(&iniMutex_);
+
     QSettings store(iniPath_, QSettings::IniFormat);
     const QString value =
         store.value(QStringLiteral("keys/") + providerId).toString();
@@ -168,6 +270,8 @@ StoredSecret SecretStore::iniLoad(const QString& providerId) const
 
 bool SecretStore::iniRemove(const QString& providerId)
 {
+    QMutexLocker lock(&iniMutex_);
+
     if (!QFileInfo::exists(iniPath_))
         return true;  // nothing stored, nothing to remove
 
@@ -205,13 +309,30 @@ bool SecretStore::keychainSave(const QString& providerId, const QString& key)
         key.toUtf8(), nullptr, &code);
     return ran && code == 0;
 #elif defined(Q_OS_MACOS)
+    // The key is written to stdin, never passed as an argument. On Unix the
+    // argument vector of a running process is world-readable through ps(1), so
+    // `security ... -w <key>` handed the provider key to every other user on the
+    // machine for as long as the process lived. Apple's own documentation calls
+    // the valueless form the recommended one: "-w password  Specify password to
+    // be added. Put at end of command to be prompted". Valued, it is a leak.
+    //
+    // The password is supplied twice because `security` verifies the typed entry
+    // before storing it, and which of the two reads happens is a detail of the
+    // tool rather than something documented. Sending it twice is correct either
+    // way: a prompt that reads once ignores the extra line, and a prompt that
+    // reads twice gets what it asked for. stdin is a pipe here, not a terminal,
+    // so nothing is echoed back.
+    const QByteArray payload =
+        key.toUtf8() + '\n' + key.toUtf8() + '\n';
     int code = -1;
     const bool ran = runTool(
         QStringLiteral("security"),
         {QStringLiteral("add-generic-password"), QStringLiteral("-U"),
          QStringLiteral("-s"), QStringLiteral("lucidgrasp"),
-         QStringLiteral("-a"), providerId, QStringLiteral("-w"), key},
-        QByteArray(), nullptr, &code);
+         QStringLiteral("-a"), providerId,
+         // Must stay last: it is what triggers the prompt.
+         QStringLiteral("-w")},
+        payload, nullptr, &code);
     return ran && code == 0;
 #else
     Q_UNUSED(providerId);

@@ -685,6 +685,43 @@ int runSelfTest()
         require(!store.load(QStringLiteral("serpapi")).found(),
                 "removing should clear the stored key");
 
+        // The cache must never outlive a write. save() refreshes it rather than
+        // invalidating it (invalidating would put a keychain round trip back on
+        // the GUI thread), so a stale hit here would mean the page showing a
+        // key the user had just changed.
+        //
+        // The warm-up is started first, so the reads below race a worker thread
+        // filling the same cache. That interleaving is the point: a cache primed
+        // off-thread is only safe if both sides actually agree on the mutex.
+        store.preloadAsync();
+        store.save(QStringLiteral("trace_moe"), QStringLiteral("first-value"));
+        require(store.load(QStringLiteral("trace_moe")).value
+                    == QStringLiteral("first-value"),
+                "a saved key should be readable straight back");
+        store.save(QStringLiteral("trace_moe"), QStringLiteral("second-value"));
+        require(store.load(QStringLiteral("trace_moe")).value
+                    == QStringLiteral("second-value"),
+                "re-saving must not be masked by a stale cache entry");
+        store.remove(QStringLiteral("trace_moe"));
+        require(!store.load(QStringLiteral("trace_moe")).found(),
+                "a removed key must not survive in the cache");
+
+        // Nor may an environment override, which outranks the file: set it
+        // after the store has already cached the file's value.
+        store.save(QStringLiteral("scraperapi"), QStringLiteral("file-value"));
+        require(store.load(QStringLiteral("scraperapi")).value
+                    == QStringLiteral("file-value"),
+                "the file value should be cached");
+        const QByteArray late =
+            app::SecretStore::environmentVariable(QStringLiteral("scraperapi"))
+                .toUtf8();
+        qputenv(late.constData(), QByteArrayLiteral("env-value"));
+        require(store.load(QStringLiteral("scraperapi")).value
+                    == QStringLiteral("env-value"),
+                "a later environment override must beat a cached file value");
+        qunsetenv(late.constData());
+        store.remove(QStringLiteral("scraperapi"));
+
 #if defined(Q_OS_UNIX)
         store.save(QStringLiteral("zenserp"),
                    QStringLiteral("another-secret-value"));

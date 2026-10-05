@@ -18,6 +18,7 @@
 #include <QRandomGenerator>
 #include <QTcpServer>
 #include <QTcpSocket>
+#include <QTimer>
 #include <QUrlQuery>
 
 namespace {
@@ -26,6 +27,11 @@ namespace {
 // objects are all we ever receive.
 constexpr int kMaxBody = 64 * 1024;
 constexpr int kTimeoutMs = 20000;
+
+// How long a connection may sit without completing a request. Generous enough
+// that a page on a slow link is never cut off mid-load, short enough that an
+// abandoned connection does not outlive the session.
+constexpr int kIdleTimeoutMs = 30000;
 
 QByteArray randomToken()
 {
@@ -337,6 +343,12 @@ bool KeyEntryServer::start(QString* error)
     token_ = randomToken();
     connect(server_, &QTcpServer::newConnection, this,
             &KeyEntryServer::onNewConnection);
+
+    // Warm the key store now, while nothing is waiting on it. The browser is
+    // opened after this returns and still has to load the page, so by the time
+    // the first request arrives the cache is normally already primed and the
+    // handler runs no helper programs at all.
+    store_->preloadAsync();
     return true;
 }
 
@@ -344,12 +356,20 @@ void KeyEntryServer::stop()
 {
     if (!server_)
         return;
+    // Close every live socket before dropping the bookkeeping. The timers are
+    // children of their sockets, so aborting is also what releases them; doing
+    // it explicitly first means nothing can fire against a half-cleared map.
+    const QList<QTcpSocket*> sockets = idleTimers_.keys();
+    for (QTcpSocket* socket : sockets)
+        socket->abort();
+
     server_->close();
     server_->deleteLater();
     server_ = nullptr;
     token_.clear();
     port_ = 0;
     buffers_.clear();
+    idleTimers_.clear();
 }
 
 QUrl KeyEntryServer::url() const
@@ -367,15 +387,36 @@ QUrl KeyEntryServer::url() const
 
 // --- Connection handling ---------------------------------------------------
 
+void KeyEntryServer::armIdleTimer(QTcpSocket* socket)
+{
+    if (!socket)
+        return;
+
+    QTimer* timer = idleTimers_.value(socket, nullptr);
+    if (!timer) {
+        timer = new QTimer(socket);  // child: dies with the socket
+        timer->setSingleShot(true);
+        connect(timer, &QTimer::timeout, this, [this, socket] {
+            // Silent close. The client either went away or is not our page, and
+            // either way there is nothing useful to say to it.
+            socket->abort();
+        });
+        idleTimers_.insert(socket, timer);
+    }
+    timer->start(kIdleTimeoutMs);
+}
+
 void KeyEntryServer::onNewConnection()
 {
     while (server_->hasPendingConnections()) {
         QTcpSocket* socket = server_->nextPendingConnection();
         buffers_.insert(socket, QByteArray());
+        armIdleTimer(socket);
         connect(socket, &QTcpSocket::readyRead, this,
                 [this, socket] { onReadyRead(socket); });
         connect(socket, &QTcpSocket::disconnected, this, [this, socket] {
             buffers_.remove(socket);
+            idleTimers_.remove(socket);  // the timer is a child; this drops the ref
             socket->deleteLater();
         });
     }
@@ -386,9 +427,18 @@ void KeyEntryServer::onReadyRead(QTcpSocket* socket)
     QByteArray& buffer = buffers_[socket];
     buffer.append(socket->readAll());
 
+    // Any progress at all buys another window, so a slow but legitimate upload
+    // is not cut off, and an early return below still leaves the socket bounded.
+    armIdleTimer(socket);
+
     const int headerEnd = buffer.indexOf("\r\n\r\n");
     if (headerEnd < 0) {
+        // Headers alone are already over the limit, so there is no length worth
+        // waiting for. The reply closes the connection via sendResponse; the
+        // buffer is dropped too so a half-received oversized request cannot be
+        // reconsidered on the next read.
         if (buffer.size() > kMaxBody) {
+            buffer.clear();
             sendResponse(socket, 413, QByteArrayLiteral("text/plain"),
                          QByteArrayLiteral("request too large"));
         }
@@ -407,6 +457,10 @@ void KeyEntryServer::onReadyRead(QTcpSocket* socket)
     }
 
     if (contentLength < 0 || contentLength > kMaxBody) {
+        // Oversized or malformed Content-Length: the request is refused on its
+        // declared size, not on what actually turned up, and the buffer goes
+        // with it so the remainder cannot be reinterpreted.
+        buffer.clear();
         sendResponse(socket, 413, QByteArrayLiteral("text/plain"),
                      QByteArrayLiteral("request too large"));
         return;

@@ -1,5 +1,10 @@
 #pragma once
 
+#include <atomic>
+#include <thread>
+
+#include <QHash>
+#include <QMutex>
 #include <QString>
 
 namespace app {
@@ -38,6 +43,18 @@ public:
     // never has to hardcode a location. Tests pass a scratch path.
     explicit SecretStore(const QString& iniPath = QString());
 
+    // Not copyable: it owns a worker thread (see preloadAsync) and a mutex, and
+    // copying either would give two objects pointing at one cache.
+    SecretStore(const SecretStore&) = delete;
+    SecretStore& operator=(const SecretStore&) = delete;
+
+    // Waits for a running preload before letting go of the cache. The store is a
+    // by-value member of the window, so it is destroyed on the way out of the
+    // app, and a preload still in flight would otherwise be reading freed
+    // members. The wait is bounded by a single provider lookup rather than all
+    // ten, because the thread watches for the cancellation.
+    ~SecretStore();
+
     // Precedence is resolved here, once, so callers cannot accidentally read a
     // lower layer first.
     StoredSecret load(const QString& providerId) const;
@@ -70,6 +87,19 @@ public:
     bool keychainEnabled() const { return keychainEnabled_; }
     bool keychainAvailable() const;
 
+    // Reads every provider on a worker thread and primes the cache, so the
+    // first request served after this returns costs no keychain calls at all.
+    //
+    // This exists because reading the keychain means running a helper program,
+    // and the key page's state endpoint asks for all ten providers at once. On
+    // the GUI thread that is ten process spawns -- each with a multi-second
+    // timeout and, on macOS, the possibility of raising its own authorisation
+    // dialog -- so simply opening the page could freeze the window for seconds.
+    // Call it when the server starts, which is before the browser is even sent
+    // to the page. Returns immediately. Calling it again while a preload is
+    // already running is a no-op rather than a second thread.
+    void preloadAsync();
+
 private:
     bool iniSave(const QString& providerId, const QString& key);
     StoredSecret iniLoad(const QString& providerId) const;
@@ -81,6 +111,38 @@ private:
 
     QString iniPath_;
     bool keychainEnabled_ = true;
+
+    // Resolved secrets, kept so a request handler never has to reach for the
+    // keychain on the GUI thread. Guarded by a mutex because preloadAsync()
+    // fills it from a worker thread while the GUI thread reads it.
+    //
+    // An entry is present if and only if that provider has been resolved, so a
+    // provider known to have no key is cached too -- without that it would be
+    // re-probed on every request, which is the case that matters most here
+    // because most providers have nothing stored.
+    mutable QMutex cacheMutex_;
+    mutable QHash<QString, StoredSecret> cache_;
+
+    // The preload worker. Held and joined rather than detached, so it cannot
+    // outlive the store it reads; cancelled cooperatively so the destructor does
+    // not have to wait out the whole list.
+    mutable std::atomic<bool> preloadCancelled_{false};
+    mutable std::thread preloadThread_;
+
+    // Serialises the INI layer against itself, which the cache mutex does not
+    // cover: the cache guards the map, this guards the file underneath it.
+    mutable QMutex iniMutex_;
+
+    // The two persistent layers, and the read-only override layer, kept apart on
+    // purpose: the override is consulted ahead of the cache and never stored in
+    // it, so their caching rules cannot be conflated.
+    StoredSecret environmentOverride(const QString& providerId) const;
+    StoredSecret resolvePersistent(const QString& providerId) const;
+    StoredSecret cachedOrLoad(const QString& providerId) const;
+    // Both const because they only write members that are already mutable: a
+    // const load() has to be able to fill the cache it just missed on.
+    void cacheStore(const QString& providerId, const StoredSecret& secret) const;
+    void cacheForget(const QString& providerId) const;
 };
 
 }  // namespace app
