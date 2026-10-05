@@ -11,6 +11,7 @@
 #include <QImage>
 #include <QImageReader>
 #include <QRegularExpression>
+#include <QSaveFile>
 #include <QSet>
 #include <QStandardPaths>
 #include <QStack>
@@ -291,7 +292,14 @@ bool ImageIndex::build(const QString &rootDir, ProgressFn progress) {
 }
 
 bool ImageIndex::save(const QString &filePath) const {
-  QFile f(filePath);
+  // QSaveFile writes to a sibling temp file and only renames it over the target
+  // on commit(), atomically and on every platform. Writing straight to the
+  // target meant a crash, a kill, or a full disk mid-write left a truncated file
+  // where a good cache used to be, and the next launch could not tell "never
+  // indexed" from "index destroyed" -- so an interrupted save threw away a
+  // whole-filesystem reindex. Committing or not committing, the cache on disk is
+  // always a complete one.
+  QSaveFile f(filePath);
   if (!f.open(QIODevice::WriteOnly))
     return false;
 
@@ -306,7 +314,16 @@ bool ImageIndex::save(const QString &filePath) const {
     out.writeRawData(reinterpret_cast<const char *>(e.features.hist.data()),
                      kHistBins);
   }
-  return out.status() == QDataStream::Ok;
+
+  // A stream error does not necessarily surface as a device error, so it is
+  // checked separately. Returning without committing leaves the previous cache
+  // untouched: QSaveFile discards its temp file when it is not committed.
+  if (out.status() != QDataStream::Ok)
+    return false;
+
+  // commit() flushes and closes before the rename, so a failure that only shows
+  // up at close cannot be promoted into a valid-looking cache.
+  return f.commit();
 }
 
 bool ImageIndex::load(const QString &filePath) {
@@ -330,12 +347,21 @@ bool ImageIndex::load(const QString &filePath) {
     return false;
   }
 
-  // Each entry needs at least a path, three hashes, two timestamps, and the
-  // histogram, so a file claiming more entries than it could physically hold is
-  // corrupt. Resizing to an unchecked count would attempt an enormous
-  // allocation.
-  constexpr qint64 kMinBytesPerEntry =
-      2 * sizeof(quint64) + 3 * sizeof(quint64) + 2 * sizeof(qint64) + kHistBins;
+  // Each entry is a path, three 64-bit hashes (fileHash/phash/dhash), two 64-bit
+  // metadata fields (size/mtimeMs) and the histogram, so a file claiming more
+  // entries than it could physically hold is corrupt. Resizing to an unchecked
+  // count would attempt an enormous allocation.
+  //
+  // Only the fixed-width part is counted, and the path is excluded because it is
+  // variable-length: this has to be a strict *lower* bound, or a legitimate
+  // cache is rejected as corrupt and silently reindexed on every launch. The
+  // previous arithmetic counted seven 64-bit fields where only five are written,
+  // putting the bound at 312 bytes against a true minimum of 296 plus the path.
+  // In practice that only bites when entries carry relative paths shorter than
+  // six characters in large numbers, so this is a latent robustness fix rather
+  // than a bug with an everyday symptom -- but the bound is now correct, and it
+  // can only ever err by rejecting, never by accepting a corrupt file.
+  constexpr qint64 kMinBytesPerEntry = 5 * sizeof(quint64) + kHistBins;
   if (qint64(count) * kMinBytesPerEntry > f.size()) {
     clear();
     return false;
