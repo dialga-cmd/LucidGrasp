@@ -3,11 +3,6 @@ name: Build and Release
 on:
   release:
     types: [published]
-  # The bug-fix review cycle needs CI feedback without publishing a release.
-  # The build + self-test steps run on every pull request; the packaging and
-  # asset-upload steps are gated on github.event_name == 'release' so a PR can
-  # neither touch a release nor fail trying to attach assets to a nonexistent
-  # one (softprops/action-gh-release has no tag to upload to on a PR ref).
   pull_request:
 
 permissions:
@@ -24,7 +19,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y cmake qt6-base-dev libopencv-dev g++
+        sudo apt-get install -y cmake qt6-base-dev libopencv-dev g++ wget ca-certificates
 
     - name: Build Project
       run: |
@@ -50,11 +45,55 @@ jobs:
         cd package
         tar -czvf lucidgrasp-linux-x64.tar.gz LucidGrasp/
 
-    - name: Upload Release Asset
+    - name: Build AppImage
+      if: github.event_name == 'release'
+      run: |
+        wget -q -O appimagetool https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
+        chmod +x appimagetool
+        mkdir -p AppDir/usr/bin
+        mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
+        mkdir -p AppDir/usr/share/applications
+        cp build/LucidGrasp AppDir/usr/bin/
+        cp lucidgrasp.png AppDir/usr/share/icons/hicolor/256x256/apps/io.github.dialga_cmd.LucidGrasp.png
+        cp lucidgrasp.desktop AppDir/usr/share/applications/io.github.dialga_cmd.LucidGrasp.desktop
+        echo '#!/bin/sh' > AppDir/AppRun
+        echo 'exec "$APPDIR/usr/bin/LucidGrasp" "$@"' >> AppDir/AppRun
+        chmod +x AppDir/AppRun
+        ./appimagetool AppDir LucidGrasp-x86_64.AppImage
+
+    - name: Update Scoop Bucket
+      if: github.event_name == 'release'
+      run: |
+        VERSION=${{ github.event.release.tag_name }}
+        REPO=${{ github.repository }}
+        URL="https://github.com/$REPO/releases/download/$VERSION/LucidGrasp_Setup_x64.exe"
+        HASH=$(curl -sL "$URL" | sha256sum | cut -d' ' -f1)
+        cat <<EOF > lucidgrasp.json
+        {
+          "version": "$VERSION",
+          "description": "High-performance image search engine built to identify and match visual media.",
+          "homepage": "https://github.com/$REPO",
+          "url": "$URL",
+          "hash": "$HASH",
+          "moniker": "lucidgrasp"
+        }
+        EOF
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+        git clone https://x-access-token:${{ secrets.BUCKET_TOKEN }}@github.com/dialga-cmd/lucidgrasp-bucket.git
+        cp lucidgrasp.json lucidgrasp-bucket/
+        cd lucidgrasp-bucket
+        git add lucidgrasp.json
+        git commit -m "Update LucidGrasp to $VERSION"
+        git push
+
+    - name: Upload Release Assets
       if: github.event_name == 'release'
       uses: softprops/action-gh-release@v2
       with:
-        files: package/lucidgrasp-linux-x64.tar.gz
+        files: |
+          package/lucidgrasp-linux-x64.tar.gz
+          LucidGrasp-x86_64.AppImage
 
   build-windows:
     runs-on: windows-latest
@@ -66,10 +105,6 @@ jobs:
     - name: Install Qt6
       uses: jurplel/install-qt-action@v4
       with:
-        # Qt 6.5 LTS only ships MSVC 2019 (v142) desktop binaries for Windows.
-        # There is no win64_msvc2022_64 build for any 6.5.x release, so asking
-        # for it makes aqt fall back and fail with
-        # "The packages ['qt_base'] were not found".
         version: '6.5.*'
         host: 'windows'
         target: 'desktop'
@@ -83,16 +118,11 @@ jobs:
         Invoke-WebRequest -Uri $url -OutFile opencv-installer.exe
         Start-Process -FilePath .\opencv-installer.exe -ArgumentList "-o`"C:\opencv`" -y" -Wait
         echo "OpenCV_DIR=C:\opencv\opencv\build" >> $env:GITHUB_ENV
-        # Single definition of where the runtime DLLs live, shared by the self
-        # test (which needs them on PATH) and the bundling step (which copies
-        # them next to the exe). They used to be written out twice.
         echo "OpenCV_BIN=C:\opencv\opencv\build\x64\vc16\bin" >> $env:GITHUB_ENV
 
     - name: Setup MSVC
       uses: ilammy/msvc-dev-cmd@v1
       with:
-        # Match the v142 toolset that both Qt 6.5 msvc2019_64 and the OpenCV
-        # 4.10.0 vc16 prebuilt binaries were compiled with.
         toolset: '14.29'
 
     - name: Build Project
@@ -107,17 +137,9 @@ jobs:
       shell: pwsh
       run: |
         $env:QT_QPA_PLATFORM = "offscreen"
-        # OpenCV's DLLs sit in their own bin directory and are not on PATH, and
-        # nothing has copied them next to the exe yet -- that happens in the
-        # bundling step below. Without this the loader cannot start the process
-        # at all, so the step fails with no output and no clue as to why.
         $env:PATH = "$env:OpenCV_BIN;$env:PATH"
         .\build\LucidGrasp.exe --selftest
-        if ($LASTEXITCODE -ne 0) {
-          # -1073741515 is STATUS_DLL_NOT_FOUND, i.e. the process never ran, as
-          # opposed to a test having run and failed.
-          throw "Self-test failed (exit code $LASTEXITCODE)"
-        }
+        if ($LASTEXITCODE -ne 0) { throw "Self-test failed (exit code $LASTEXITCODE)" }
 
     - name: Bundle Dependencies
       if: github.event_name == 'release'
@@ -129,11 +151,7 @@ jobs:
         Copy-Item lucidgrasp.png $dest\
         Copy-Item README.md $dest\
         Copy-Item LICENSE $dest\
-
-        # Run windeployqt to bundle all Qt DLLs, plugins, and platform files
         windeployqt --release --no-translations --no-system-d3d-compiler --no-opengl-sw $dest\LucidGrasp.exe
-
-        # Copy the OpenCV world DLL
         Copy-Item "$env:OpenCV_BIN\opencv_world*.dll" $dest\
 
     - name: Install Inno Setup
@@ -146,34 +164,123 @@ jobs:
       if: github.event_name == 'release'
       shell: pwsh
       run: |
-        # Read the version out of the CMake cache rather than keeping a third
-        # copy of it: it is already in project(... VERSION ...) and already
-        # compiled into the binary, so this makes the installer agree with both
-        # instead of drifting from whichever one someone remembers to bump.
-        # The entry is CMAKE_PROJECT_VERSION, not PROJECT_VERSION. project()
-        # sets PROJECT_VERSION as an ordinary variable, which CMake never
-        # writes to the cache, so a search for the bare name finds nothing.
         $cache = Get-Content build\CMakeCache.txt
         $match = $cache | Select-String '^CMAKE_PROJECT_VERSION:STATIC=(.+)$'
-        if (-not $match) {
-          Write-Host "VERSION entries actually present in CMakeCache.txt:"
-          $cache | Select-String 'VERSION' | ForEach-Object { Write-Host "  $_" }
-          throw "CMAKE_PROJECT_VERSION not found in CMakeCache.txt"
-        }
+        if (-not $match) { throw "CMAKE_PROJECT_VERSION not found in CMakeCache.txt" }
         $version = $match.Matches[0].Groups[1].Value
-        echo "Installer version: $version"
-
-        # [^\r\n]* rather than .*$ because the file is read raw: a greedy .*
-        # would swallow the \r of a CRLF line ending and leave the rewritten
-        # line with a mismatched terminator.
-        (Get-Content installer.iss -Raw) `
-          -replace '(?m)^AppVersion=[^\r\n]*', "AppVersion=$version" `
-          | Set-Content installer.iss -NoNewline
+        (Get-Content installer.iss -Raw) -replace '(?m)^AppVersion=[^\r\n]*', "AppVersion=$version" | Set-Content installer.iss -NoNewline
         & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
-        if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
 
     - name: Upload Release Asset
       if: github.event_name == 'release'
       uses: softprops/action-gh-release@v2
       with:
         files: package/LucidGrasp_Setup_x64.exe
+
+  build-macos:
+    runs-on: macos-15-intel
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Qt6
+      uses: jurplel/install-qt-action@v4
+      with:
+        version: '6.5.*'
+        host: 'mac'
+        target: 'desktop'
+
+    - name: Install OpenCV
+      run: |
+        brew install opencv@4
+
+    - name: Generate app icon
+      run: |
+        chmod +x scripts/make-icns.sh
+        ./scripts/make-icns.sh lucidgrasp.png lucidgrasp.icns
+        test -s lucidgrasp.icns
+
+    - name: Build Project
+      run: |
+        cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+          -DOpenCV_DIR="$(brew --prefix opencv@4)/lib/cmake/opencv4" \
+          -DLUCIDGRASP_ICNS="$PWD/lucidgrasp.icns"
+        cmake --build build -j$(sysctl -n hw.ncpu)
+
+    - name: Self Test
+      run: |
+        QT_QPA_PLATFORM=offscreen ./build/LucidGrasp.app/Contents/MacOS/LucidGrasp --selftest
+        if [ $? -ne 0 ]; then
+          echo "Self-test failed"
+          exit 1
+        fi
+
+    - name: Bundle Dependencies
+      if: github.event_name == 'release'
+      run: |
+        APP=build/LucidGrasp.app
+        MACOS_DIR="$APP/Contents/MacOS"
+        FRAMEWORKS="$APP/Contents/Frameworks"
+        if [ ! -s "$APP/Contents/Resources/lucidgrasp.icns" ]; then
+          echo "ERROR: the bundle carries no icon."
+          exit 1
+        fi
+        "$QT_ROOT_DIR/bin/macdeployqt" "$APP" -no-strip
+        mkdir -p "$FRAMEWORKS"
+        OT_DYLIBS=$(otool -L "$MACOS_DIR/LucidGrasp" | tail -n +2 | awk '{print $1}' | grep -E '^/opt/homebrew|^/usr/local' || true)
+        for lib in $OT_DYLIBS; do
+          base=$(basename "$lib")
+          if [ ! -f "$FRAMEWORKS/$base" ]; then
+            cp -L "$lib" "$FRAMEWORKS/$base"
+          fi
+          install_name_tool -change "$lib" "@rpath/$base" "$MACOS_DIR/LucidGrasp"
+        done
+        for dylib in "$FRAMEWORKS"/libopencv*.dylib; do
+          [ -e "$dylib" ] || continue
+          for dep in $(otool -L "$dylib" | tail -n +2 | awk '{print $1}' | grep -E '^/opt/homebrew|^/usr/local' || true); do
+            dbase=$(basename "$dep")
+            if [ ! -f "$FRAMEWORKS/$dbase" ]; then
+              cp -L "$dep" "$FRAMEWORKS/$dbase"
+            fi
+            install_name_tool -change "$dep" "@rpath/$dbase" "$dylib"
+          done
+        done
+        for dylib in "$FRAMEWORKS"/libopencv*.dylib; do
+          [ -e "$dylib" ] || continue
+          install_name_tool -id "@rpath/$(basename "$dylib")" "$dylib" || true
+        done
+        install_name_tool -add_rpath "@executable_path/../Frameworks" "$MACOS_DIR/LucidGrasp" 2>/dev/null || true
+        codesign --force --deep --sign - "$APP"
+
+    - name: Create DMG
+      if: github.event_name == 'release'
+      run: |
+        APP=build/LucidGrasp.app
+        STAGE=build/dmg
+        rm -rf "$STAGE"
+        mkdir -p "$STAGE"
+        cp -R "$APP" "$STAGE/"
+        ln -s /Applications "$STAGE/Applications"
+        VERSION=$(grep '^CMAKE_PROJECT_VERSION:STATIC=' build/CMakeCache.txt | cut -d= -f2)
+        if [ -z "$VERSION" ]; then
+          echo "ERROR: CMAKE_PROJECT_VERSION not found in CMakeCache.txt"
+          exit 1
+        fi
+        DMG="lucidgrasp-macos-${VERSION}.dmg"
+        hdiutil create -volname "LucidGrasp ${VERSION}" -srcfolder "$STAGE" -ov -format UDZO "$DMG"
+        hdiutil attach "$DMG" -nobrowse -mountpoint /tmp/lucidgrasp-verify
+        if [ ! -d /tmp/lucidgrasp-verify/LucidGrasp.app ]; then
+          echo "ERROR: the app is not at the root of the mounted image"
+          hdiutil detach /tmp/lucidgrasp-verify || true
+          exit 1
+        fi
+        plutil -lint /tmp/lucidgrasp-verify/LucidGrasp.app/Contents/Info.plist
+        hdiutil detach /tmp/lucidgrasp-verify
+        ls -lh "$DMG"
+
+    - name: Upload Release Asset
+      if: github.event_//release'
+      uses: softprops/action-gh-release@v2
+      with:
+        files: lucidgrasp-macos-*.dmg

@@ -1,0 +1,41 @@
+<?xml version="1.1" encoding="UTF-8"?>
+<appstream xmlns="http://www.freedesktop.org/standards/appstream/appstream.xsd" version="3.0">
+  <app id="io.github.dialga_cmd.LucidGrasp">
+    <name>LucidGrasp</name>
+    <generic>Image Search Engine</generic>
+    <summary>High-performance image search and similarity matching</summary>
+    <description>
+      LucidGrasp is a high-performance image search engine built to identify and match visual media.
+      It operates by analyzing images at the pixel level, combining structural patterns, color distributions,
+      and keypoint features to produce a precise similarity percentage.
+
+      Key features include:
+      - Color-invariant matching: Detects edited versions of images, including those with color grading or filters.
+      - Two-stage search: Uses perceptual hashing for rapid pre-filtering and OpenCV (SSIM/ORB) for precise scoring.
+      - Massive scale: Capable of indexing entire filesystems without slowing down search performance.
+      - System integration: Follows system-wide light/dark themes and accent colors.
+    </description>
+    <screenshot type="screenshot">https://raw.githubusercontent.com/dialga-cmd/LucidGrasp/main/screenshots/1.png</screenshot>
+    <screenshot type="screenshot">https://raw.githubusercontent.com/dialga-cmd/LucidGrasp/main/screenshots/2.png</screenshot>
+    <screenshot type="screenshot">https://raw.githubusercontent.com/dialga-cmd/LucidGrasp/main/screenshots/3.png</screenshot>
+    <developer>
+      <name>dialga-cmd</name>
+      <url>https://github.com/dialga-cmd</url>
+    </developer>
+    <project license="MIT">
+      <url>https://github.com/dialga-cmd/LucidGrasp</url>
+    </project>
+    <release>
+      <version>1.2.0</version>
+      <date>2026-10-06</date>
+    </release>
+    <related>
+      <url type="homepage">https://github.com/dialga-cmd/LucidGrasp</url>
+    </related>
+    <codeset>
+      <category>Graphics</category>
+      <category>Utility</category>
+    </codeset>
+    <launchable type="desktop-file">io.github.dialga_cmd.LucidGrasp.desktop</launchable>
+  </app>
+</appstream>

@@ -1,10 +1,15 @@
-# Build directories and files
+# --- Build & Dependency Directories ---
 build/
+build-dir/
 build-stripped/
+.flatpak-builder/
+.cache/
 compile_commands.json
-CMakeUserPresets.json
+
+# --- CMake/Build System ---
 CMakeCache.txt
 CMakeFiles/
+CMakeUserPresets.json
 Makefile
 *.cmake
 *.o
@@ -14,7 +19,7 @@ Makefile
 *.dll
 *.exe
 
-# IDE and Editor folders
+# --- IDEs & Editors ---
 .vscode/
 .idea/
 *.swp
@@ -22,56 +27,21 @@ Makefile
 *~
 .DS_Store
 
-# Application data
+# --- Application Data & Cache ---
 .image_search_index.bin
+*cache
+node_modules/
+.npm/
 
-# Brag video output
-brag-output/
-
-# Third-party libraries (downloaded/extracted)
+# --- Third-party & Assets ---
 third_party/
-
-# Machine Learning models (large files)
 models/
 *.onnx
 *.pt
 *.bin
 *.fix*
-*cache
-
-CMakeUserPresets.json
-CMakeCache.txt
-CMakeFiles/
-Makefile
-*.cmake
-*.o
-*.a
-*.so
-*.dylib
-*.dll
-*.exe
-
-# IDE and Editor folders
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-.DS_Store
-
-# Application data
-.image_search_index.bin
-
-# Brag video output
 brag-output/
 
-# Third-party libraries (downloaded/extracted)
-third_party/
-
-# Machine Learning models (large files)
-models/
-*.onnx
-*.pt
-*.bin
-*.fix*
-*cache
+# --- System/OS ---
+Thumbs.db
+ehthumbs.db

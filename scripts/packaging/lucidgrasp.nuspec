@@ -1,0 +1,19 @@
+# Chocolatey Package Manifest (lucidgrasp.nuspec)
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://chocolatey.org/schema/chocolatey">
+  <metadata>
+    <id>lucidgrasp</id>
+    <version>1.2.0</version>
+    <title>LucidGrasp</title>
+    <authors>dialga-cmd</authors>
+    <description>High-performance image search engine built to identify and match visual media.</description>
+    <summary>Image search engine based on SSIM, ORB and Color Histograms</summary>
+    <tags>image-search opencv qt6</tags>
+    <url>https://github.com/dialga-cmd/LucidGrasp</url>
+    <externalUrl>https://github.com/dialga-cmd/LucidGrasp</externalUrl>
+    <license>MIT</license>
+  </metadata>
+  <files>
+    <file source="LucidGrasp_Setup_x64.exe" destination="installers" />
+  </files>
+</package>
