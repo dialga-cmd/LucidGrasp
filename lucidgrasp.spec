@@ -16,9 +16,7 @@ BuildRequires:  gcc-c++
 LucidGrasp is a high-performance image search engine built to identify and match visual media.
 
 %prep
-mkdir -p %{_builddir}
-cp -r . %{_builddir}/lucidgrasp-%{version}
-cd %{_builddir}/lucidgrasp-%{version}
+cd %{_builddir}
 
 %build
 mkdir build
