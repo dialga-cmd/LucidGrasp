@@ -16,11 +16,19 @@ permissions:
 
 jobs:
   build-macos:
-    # macos-13 is the Intel (x86_64) runner. The arm64 runners cannot run an
-    # x86_64 Homebrew tree, and an x86_64 app still runs under Rosetta on Apple
-    # Silicon, so one Intel build covers both -- whereas an arm64-only build
-    # would not run at all on an Intel Mac.
-    runs-on: macos-13
+    # macos-15-intel, NOT macos-13. GitHub retired the macOS 13 image on
+    # 2025-12-04, and a job naming a retired label does not fail -- it queues
+    # forever waiting for a runner that will never be provisioned. macos-15-intel
+    # is the replacement GitHub added for x86_64 and runs until August 2027.
+    #
+    # Intel rather than arm64 on purpose: an x86_64 app runs on both under
+    # Rosetta on Apple Silicon, whereas an arm64-only build would not start at
+    # all on an Intel Mac. One artifact covers both, so there is no second build.
+    #
+    # Note the expiry. When it passes, migrate to macos-26-intel, and eventually
+    # to arm64 with lipo, since GitHub drops Intel entirely after the macOS 15
+    # image retires in Fall 2027.
+    runs-on: macos-15-intel
 
     steps:
     - name: Checkout code
@@ -32,19 +40,28 @@ jobs:
         version: '6.5.*'
         host: 'macos'
         target: 'desktop'
-        arch: 'x86_64'
+        # No arch. aqt names the macOS package directory clang_64 regardless of
+        # the build's real architecture, so 'x86_64' resolves to nothing and the
+        # install fails. Omitted on purpose: for macOS the action documents that
+        # the value is determined dynamically, which is the one thing that works.
 
     - name: Install OpenCV
       run: |
-        # Pinned rather than tracking brew's current version: the release has to
-        # be reproducible from the tag, and "whatever brew serves today" would
-        # make two builds of the same commit differ.
-        brew install opencv@4.10
+        # opencv@4, NOT opencv@4.10. Homebrew names versioned formulae
+        # opencv@4, opencv@5 and so on, with the exact patch release tracked in
+        # the formula; there is no opencv@4.10 and brew exits non-zero on it.
+        # The unversioned `opencv` is now 5.x, whose API this code has never been
+        # built against, so the major version is pinned here instead.
+        #
+        # The patch level is deliberately not pinned: this formula is only
+        # updated in place, so pinning 4.10 would mean pinning a version that no
+        # longer exists and failing the same way.
+        brew install opencv@4
 
     - name: Build Project
       run: |
         cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
-          -DOpenCV_DIR="$(brew --prefix opencv@4.10)/lib/cmake/opencv4"
+          -DOpenCV_DIR="$(brew --prefix opencv@4)/lib/cmake/opencv4"
         cmake --build build -j$(sysctl -n hw.ncpu)
 
     - name: Self Test
@@ -69,10 +86,25 @@ jobs:
         # rewrites the binary's load paths to point at them. It knows nothing
         # about OpenCV, which is handled below.
         #
-        # Run on the bundle directory, not the executable inside it: the
-        # executable form is for non-bundle apps and silently does the wrong
-        # thing to a bundle.
-        "$(brew --prefix qt)/bin/macdeployqt" "$APP" \
+        # From $QT_ROOT_DIR, which install-qt-action exports, and NOT from Homebrew.
+        # The runner has a Qt of its own and `brew install qt` would give a second,
+        # different one; a macdeployqt from a different Qt than the one the binary
+        # links against produces a bundle whose frameworks do not match it. Using
+        # the same Qt that CMake configured against is the only safe pairing.
+        #
+        # Checked explicitly rather than letting the shell report "No such file":
+        # without this, a Qt that failed to install looks like a packaging bug
+        # several steps later, in the middle of the dylib rewriting.
+        if [ -z "$QT_ROOT_DIR" ]; then
+          echo "ERROR: QT_ROOT_DIR is unset; the Qt install step did not run"
+          exit 1
+        fi
+        if [ ! -x "$QT_ROOT_DIR/bin/macdeployqt" ]; then
+          echo "ERROR: no macdeployqt at $QT_ROOT_DIR/bin/macdeployqt"
+          ls "$QT_ROOT_DIR/bin" 2>/dev/null || echo "(no bin directory either)"
+          exit 1
+        fi
+        "$QT_ROOT_DIR/bin/macdeployqt" "$APP" \
           -no-translations -no-strip -no-system-d3d-compiler
 
         # OpenCV arrives from Homebrew and is linked by absolute path
