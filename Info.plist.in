@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+    "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Name in the menu bar and the bundle's own name. -->
+    <key>CFBundleName</key>
+    <string>${MACOSX_BUNDLE_BUNDLE_NAME}</string>
+
+    <!-- What the About panel and Finder's Get Info call the app. -->
+    <key>CFBundleDisplayName</key>
+    <string>${MACOSX_BUNDLE_BUNDLE_NAME}</string>
+
+    <!-- The file Finder executes. Omitting it is the classic silent failure: the
+         bundle validates, has an icon, has a version, and launching it does
+         nothing at all, with no error to explain why. -->
+    <key>CFBundleExecutable</key>
+    <string>${MACOSX_BUNDLE_EXECUTABLE_NAME}</string>
+
+    <!-- The icon inside Contents/Resources. -->
+    <key>CFBundleIconFile</key>
+    <string>${MACOSX_BUNDLE_ICON_FILE}</string>
+
+    <!-- Rewritten from project(... VERSION ...), the same value compiled into the
+         binary as LUCIDGRASP_VERSION for the update checker. A third typed-out
+         copy would ship a package whose metadata disagrees with the program
+         inside it. -->
+    <key>CFBundleShortVersionString</key>
+    <string>${PROJECT_VERSION}</string>
+    <!-- Build number. codesign requires dot-separated digits, and "1.2.3" already
+         satisfies that, so the same number is reused rather than a second one
+         invented here. -->
+    <key>CFBundleVersion</key>
+    <string>${MACOSX_BUNDLE_BUNDLE_VERSION}</string>
+
+    <!-- Reverse-DNS. LaunchServices rejects a bare name, so "LucidGrasp" alone
+         would not do. -->
+    <key>CFBundleIdentifier</key>
+    <string>${MACOSX_BUNDLE_GUI_IDENTIFIER}</string>
+
+    <!-- NSApplication rather than empty: this is what makes the bundle a regular
+         Cocoa GUI app. -->
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+
+    <!-- false, not absent. True makes this a background agent: it launches,
+         shows no window, and never appears in the Dock or the app switcher,
+         which is a confusing way for a search tool to behave. -->
+
+    <!-- Note: a double hyphen may not appear inside an XML comment, so the
+         dashes used as punctuation below are written as em dashes. plutil
+         rejects the whole plist otherwise, and the failure is reported as a
+         parse error with no mention of the comment that caused it. -->
+    <key>LSUIElement</key>
+    <false/>
+
+    <!-- The app switches its own palette from the Qt side, so it only needs to be
+         told that a Retina display is acceptable rather than downsampled. -->
+    <key>NSHighResolutionCapable</key>
+    <true/>
+
+    <!-- No NSMainNibFile and no CFBundleDocumentTypes on purpose.
+
+         Qt creates the application object itself and ships no nib, so naming a
+         MainMenu.xib would leave the menu bar permanently empty.
+
+         CFBundleDocumentTypes would advertise that the app opens images from
+         Finder, but main.cpp installs no QFileOpenEvent handler, so such a file
+         would be received and silently discarded, a claim the app cannot keep.
+         Adding both together means dropping an image on the Dock icon works;
+         adding either alone means a promise the code does not honour. -->
+
+    <key>NSHumanReadableCopyright</key>
+    <string>LucidGrasp contributors</string>
+</dict>
+</plist>

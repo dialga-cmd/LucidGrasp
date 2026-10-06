@@ -9,6 +9,7 @@
 
 #include <QColor>
 #include <QDateTime>
+#include <QCoreApplication>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
@@ -164,9 +165,27 @@ void printResults(const std::vector<core::SearchResult>& results)
 int runSelfTest()
 {
     int failures = 0;
-    const QString base =
-        QDir::tempPath() + QStringLiteral("/lucidgrasp_selftest");
+
+    // Unique per process. A fixed path made concurrent runs destructive to each
+    // other: both used the same library and query directories and both cleared
+    // them on entry, so one run's removeRecursively() deleted the corpus the
+    // other was halfway through reading. The symptom was "missing expected
+    // textured results" appearing in one of two simultaneous runs and never on
+    // its own -- the kind of intermittent failure that gets misfiled as a flaky
+    // test rather than as the shared mutable state it actually was.
+    //
+    // The PID is used rather than a timestamp because two selftests can start
+    // within the same clock tick, and the name has to be unique on the machine,
+    // not merely unlikely to collide.
+    const QString base = QDir::tempPath() +
+                         QStringLiteral("/lucidgrasp_selftest_") +
+                         QString::number(QCoreApplication::applicationPid());
     QDir(base).removeRecursively();
+    // Left behind on purpose. Removing it at the end would be tidier, but a run
+    // that dies mid-way would then leave nothing to inspect, and the corpus is
+    // the evidence when a case fails. A directory per PID means the leftovers
+    // cannot grow without bound across normal use.
+    QDir(base).mkpath(QStringLiteral("."));
     const QString lib = base + QStringLiteral("/library");
     const QString qdir = base + QStringLiteral("/query");
     QDir().mkpath(lib);
@@ -625,6 +644,84 @@ int runSelfTest()
             } else {
                 std::printf("PASS: original and graded edit clear the default "
                             "50%% threshold\n\n");
+            }
+        }
+    }
+
+    // --- Case 10: index entries can be dropped on delete -----------------
+    // The trash button removes the file and then has to drop its entry, or the
+    // deleted image keeps matching searches. The part worth testing is that the
+    // removal matches on relPath and that it cannot silently do nothing: an
+    // index whose removeEntry always returned false would look correct right up
+    // until a deleted photo kept coming back as a result.
+    std::printf("Case 10 — index entries removed on delete:\n");
+    {
+        const QString libdir = base + QStringLiteral("/deletelib");
+        QDir().mkpath(libdir);
+
+        // Three files, so a removal has to target one entry and leave the rest.
+        for (const char *name : {"alpha.png", "beta.png", "gamma.png"}) {
+            QImage img(24, 24, QImage::Format_RGB32);
+            img.fill(Qt::white);
+            img.save(QString(libdir) + '/' + name, "PNG");
+        }
+
+        core::ImageIndex victim;
+        std::printf("PASS: built a 3-image library\n");
+        if (!victim.build(libdir) || victim.size() != 3) {
+            std::printf("FAIL: could not build the test library (%zu entries)\n\n",
+                        size_t(victim.size()));
+            ++failures;
+        } else {
+            // Exactly one entry goes, and the surviving count proves it.
+            const bool removed = victim.removeEntry(QStringLiteral("beta.png"));
+            const size_t after = victim.size();
+            if (!removed) {
+                std::printf("FAIL: removeEntry did not find an indexed file\n\n");
+                ++failures;
+            } else if (after != 2) {
+                std::printf("FAIL: expected 2 entries left, got %zu\n\n",
+                            size_t(after));
+                ++failures;
+            } else {
+                std::printf("PASS: one entry removed, two left\n");
+            }
+
+            // Removing again must report honestly rather than returning true and
+            // decrementing something else. A delete button pressed twice, or on
+            // a stale grid row, lands exactly here.
+            if (victim.removeEntry(QStringLiteral("beta.png"))) {
+                std::printf("FAIL: removing the same entry twice claimed "
+                            "success\n\n");
+                ++failures;
+            } else {
+                std::printf("PASS: second removal of the same entry refused\n");
+            }
+
+            // A path that was never indexed, including the absolute spelling of
+            // one that was. removeEntry is keyed on relPath, so handing it an
+            // absolute path must not remove a different entry by coincidence.
+            if (victim.removeEntry(libdir + QStringLiteral("/gamma.png"))) {
+                std::printf("FAIL: an absolute path matched a relative key\n\n");
+                ++failures;
+            } else if (victim.size() != 2) {
+                std::printf("FAIL: a failed removal still changed the size\n\n");
+                ++failures;
+            } else {
+                std::printf("PASS: absolute path and unknown key both refused\n");
+            }
+
+            // The remaining two must still be searchable, i.e. intact rather
+            // than merely counted.
+            const QString survivor = libdir + QStringLiteral("/alpha.png");
+            std::vector<core::SearchResult> found;
+            if (!victim.searchFile(survivor, 0.0, found) || found.empty() ||
+                found.front().relPath != QStringLiteral("alpha.png")) {
+                std::printf("FAIL: survivors are not searchable after a "
+                            "removal\n\n");
+                ++failures;
+            } else {
+                std::printf("PASS: surviving entries still searchable\n\n");
             }
         }
     }

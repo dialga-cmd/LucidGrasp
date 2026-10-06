@@ -1,5 +1,7 @@
 #include "ui/mainwindow.h"
 
+#include "ui/file_actions.h"
+
 #include <QAbstractButton>
 #include <QAction>
 #include <QColor>
@@ -7,6 +9,7 @@
 #include <QDialog>
 #include <QElapsedTimer>
 #include <QFileDialog>
+#include <QFileIconProvider>
 #include <QFileInfo>
 #include <QGroupBox>
 #include <QGuiApplication>
@@ -24,6 +27,7 @@
 #include <QPainterPath>
 #include <QPair>
 #include <QPalette>
+#include <QPointer>
 #include <QPixmap>
 #include <QProgressBar>
 #include <QPushButton>
@@ -283,27 +287,47 @@ MainWindow::MainWindow(QWidget *parent)
   central->setObjectName(QStringLiteral("centralWidget"));
   auto *rootLayout = new QVBoxLayout(central);
 
-  // ----- top bar: title on the left, theme control on the right -----
+  // ----- top bar: title on the left, controls on the right -----
   auto *topBar = new QHBoxLayout;
   topBar->setContentsMargins(0, 0, 0, 0);
+  // An explicit gap: with a single button the layout's own spacing was never
+  // visible, and three of them flush together read as one control.
+  topBar->setSpacing(8);
 
   auto *title = new QLabel(QStringLiteral("LucidGrasp"), central);
   title->setObjectName(QStringLiteral("titleLabel"));
   topBar->addWidget(title);
   topBar->addStretch(1);
 
-  // Square, icon-only: the glyph shows the theme you are in, the tooltip says
-  // what clicking does, and the square footprint keeps the bar compact.
-  themeToggleBtn_ = new QPushButton(central);
-  themeToggleBtn_->setObjectName(QStringLiteral("themeToggleBtn"));
-  themeToggleBtn_->setCursor(Qt::PointingHandCursor);
-
-  // Sized off the font so it lines up with the buttons in the panels below
-  // and still grows if the user raises their system font size.
+  // Square, icon-only. One factory for all three so they stay the same size as
+  // a set, sized off the font so they line up with the buttons in the panels
+  // below and still grow if the user raises their system font size.
   const int side = fontMetrics().height() + 12;
-  themeToggleBtn_->setIconSize(QSize(side - 12, side - 12));
-  themeToggleBtn_->setFixedSize(side, side);
+  const auto makeToolButton = [&](const QString &objectName,
+                                  const QString &tip) -> QPushButton * {
+    auto *btn = new QPushButton(central);
+    btn->setObjectName(objectName);
+    btn->setToolTip(tip);
+    btn->setCursor(Qt::PointingHandCursor);
+    btn->setIconSize(QSize(side - 12, side - 12));
+    btn->setFixedSize(side, side);
+    return btn;
+  };
+
+  // Order is deliberate: theme, reveal, trash. The destructive control sits
+  // furthest from the two pressed constantly, so it cannot be hit by muscle
+  // memory aimed at the others.
+  themeToggleBtn_ =
+      makeToolButton(QStringLiteral("themeToggleBtn"), QString());
   topBar->addWidget(themeToggleBtn_);
+
+  revealBtn_ = makeToolButton(QStringLiteral("revealBtn"),
+                              QStringLiteral("Show in file manager"));
+  topBar->addWidget(revealBtn_);
+
+  trashBtn_ = makeToolButton(QStringLiteral("trashBtn"),
+                             QStringLiteral("Move to trash"));
+  topBar->addWidget(trashBtn_);
 
   rootLayout->addLayout(topBar);
 
@@ -408,6 +432,13 @@ MainWindow::MainWindow(QWidget *parent)
   connect(searchBtn_, &QPushButton::clicked, this, &MainWindow::startSearch);
   connect(results_, &QListWidget::itemDoubleClicked, this,
           &MainWindow::openResult);
+  connect(revealBtn_, &QPushButton::clicked, this, &MainWindow::revealResult);
+  connect(trashBtn_, &QPushButton::clicked, this, &MainWindow::trashResult);
+  // currentItemChanged rather than itemSelectionChanged: the first fires for a
+  // programmatic currentItem() too, so the buttons cannot drift out of sync
+  // with what the grid reports as current.
+  connect(results_, &QListWidget::currentItemChanged, this,
+          [this](QListWidgetItem *) { updateResultActions(); });
   connect(themeToggleBtn_, &QPushButton::clicked, this,
           &MainWindow::toggleTheme);
 
@@ -960,6 +991,10 @@ void MainWindow::renderResults(const std::vector<core::SearchResult> &results) {
             .arg(pct)
             .arg(QFileInfo(r.absPath).fileName()));
     item->setData(Qt::UserRole, r.absPath);
+    // The relPath too, because that is the spelling ImageIndex keys its entries
+    // on. resolve() only needs the absolute path, but removeEntry() cannot be
+    // handed one and be expected to match.
+    item->setData(Qt::UserRole + 1, r.relPath);
     item->setToolTip(
         r.absPath + QStringLiteral("\nscore: ") +
         QString::number(r.score, 'f', 3) +
@@ -967,6 +1002,122 @@ void MainWindow::renderResults(const std::vector<core::SearchResult> &results) {
     item->setSizeHint({170, 200});
     results_->addItem(item);
   }
+}
+
+// ----- result actions -------------------------------------------------------
+
+QListWidgetItem *MainWindow::currentResult() const {
+  QListWidgetItem *item = results_->currentItem();
+  // currentItem() can be non-null with no usable path if the selection was
+  // cleared underneath us, so the data is checked rather than assumed.
+  if (!item || item->data(Qt::UserRole).toString().isEmpty())
+    return nullptr;
+  return item;
+}
+
+void MainWindow::revealResult() {
+  QListWidgetItem *item = currentResult();
+  if (!item)
+    return;
+  const QString path = item->data(Qt::UserRole).toString();
+
+  const QDir dir = QFileInfo(path).absoluteDir();
+  if (!dir.exists()) {
+    QMessageBox::warning(this, QStringLiteral("Cannot show file"),
+                         QStringLiteral("The folder is gone:\n%1")
+                             .arg(QDir::toNativeSeparators(dir.path())));
+    return;
+  }
+
+  // The platform work, including the freedesktop.org D-Bus reveal, lives in
+  // file_actions so it can be exercised without a window.
+  //
+  // QPointer because the reply is asynchronous and the window can be closed
+  // while it is outstanding. A raw `this` in that lambda would be a
+  // use-after-free the moment the user quit during the five second timeout.
+  QPointer<MainWindow> self(this);
+  ui::revealInFileManager(path, [self, dir](ui::RevealOutcome outcome) {
+    if (!self)
+      return;
+    // Selected is the expected outcome and needs no comment. The other two are
+    // said plainly, in the status bar rather than a modal box: they are the
+    // rare paths, and a dialog that interrupts to explain something the user
+    // can already see on their own desktop is worse than the problem itself.
+    switch (outcome) {
+      case ui::RevealOutcome::Selected:
+        break;
+      case ui::RevealOutcome::FolderOnly:
+        self->statusBar()->showMessage(
+            QStringLiteral("Opened %1, but this file manager cannot preselect "
+                           "a file.")
+                .arg(QDir::toNativeSeparators(dir.path())),
+            6000);
+        break;
+      case ui::RevealOutcome::Failed:
+        self->statusBar()->showMessage(
+            QStringLiteral("Could not open a file manager."), 6000);
+        break;
+    }
+  });
+}
+
+void MainWindow::trashResult() {
+  QListWidgetItem *item = currentResult();
+  if (!item)
+    return;
+  const QString path = item->data(Qt::UserRole).toString();
+  const QString name = QFileInfo(path).fileName();
+
+  // Destructive and unrecoverable from inside the app, so it is confirmed by
+  // name. The answer tells the user where the file went, because a trash action
+  // that silently vanishes is indistinguishable from a bug.
+  const auto answer = QMessageBox::question(
+      this, QStringLiteral("Move to trash"),
+      QStringLiteral("Move this file to the trash?\n\n%1").arg(name),
+      QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+  if (answer != QMessageBox::Yes)
+    return;
+
+  // moveToTrash() rather than a plain remove: on Windows it is the shell API,
+  // so the file lands in the Recycle Bin and is recoverable, which is what the
+  // button promises. A hard delete is not undoable and would be a much worse
+  // answer to an accidental click.
+  QString error;
+  if (!ui::moveToTrash(path, &error)) {
+    QMessageBox::critical(this, QStringLiteral("Cannot delete"),
+                          error.isEmpty()
+                              ? QStringLiteral("The file could not be moved to "
+                                               "the trash.")
+                              : error);
+    return;
+  }
+
+  // Dropped from the index too, so it stops matching straight away. The cache
+  // file on disk is deliberately left alone: rewriting it here would save the
+  // whole index, which for a large library is a noticeable pause on what the
+  // user expects to be an instant action, and the entry would be gone on the
+  // next build anyway. Until then the search already skips files that no
+  // longer exist, so a stale entry cannot resurface as a ghost result.
+  index_.removeEntry(item->data(Qt::UserRole + 1).toString());
+
+  // takeItem() hands ownership back, so the row is deleted here. deleteItem()
+  // would also drop the current item and the selection with it, and the grid
+  // would then report nothing selected even though there is still something to
+  // act on.
+  const int row = results_->row(item);
+  delete results_->takeItem(row);
+
+  statusBar()->showMessage(QStringLiteral("Moved to trash: %1").arg(name),
+                           5000);
+  updateResultActions();
+}
+
+void MainWindow::updateResultActions() {
+  const bool haveResult = currentResult() != nullptr;
+  // Disabled rather than hidden so the buttons do not shift the grid as the
+  // selection moves between items.
+  revealBtn_->setEnabled(haveResult);
+  trashBtn_->setEnabled(haveResult);
 }
 
 void MainWindow::setBusy(bool busy) {
@@ -986,6 +1137,12 @@ void MainWindow::openResult(QListWidgetItem *item) {
 
 void MainWindow::updateActions() {
   const bool busy = indexing_ || searching_;
+  // The result actions are gated on the same lockout as everything else that
+  // reads index_. A search worker walks it, so letting a delete land mid-search
+  // would pull an entry out from under it.
+  const bool canAct = !busy && currentResult() != nullptr;
+  revealBtn_->setEnabled(canAct);
+  trashBtn_->setEnabled(canAct);
   const bool canIndex = !busy && !libEdit_->text().isEmpty();
   indexBtn_->setEnabled(indexing_ || canIndex);
   browseLibBtn_->setEnabled(!busy);
@@ -1028,6 +1185,86 @@ void MainWindow::setDark(bool dark) {
 }
 
 void MainWindow::toggleTheme() { setDark(!darkMode_); }
+
+// The bin glyph. Painted rather than taken from a themed icon because Qt 6.4
+// has no QFileIconProvider::Trash, and the app ships no icon assets.
+//
+// Repainted on every theme change rather than once at construction: the ink
+// colour comes from the palette, which applyTheme() replaces, so a bin painted
+// during construction ends up dark ink on the dark background -- invisible on
+// exactly the desktops that need it most.
+QIcon MainWindow::paintTrashGlyph(int logicalSize, const QColor &ink,
+                                 const QColor &faded) {
+  // Drawn as one path and rendered twice, rather than two separate paint
+  // routines: the second pass has to be the identical shape in a different
+  // colour, and a copy that can drift is a copy that will.
+  const auto draw = [&](const QColor &colour) {
+    const qreal s = logicalSize;
+    const qreal dpr = qApp->devicePixelRatio();
+    QPixmap bin(qRound(s * dpr), qRound(s * dpr));
+    bin.setDevicePixelRatio(dpr);
+    bin.fill(Qt::transparent);
+
+    QPainter p(&bin);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.scale(dpr, dpr);
+    p.setPen(QPen(colour, qMax(1.0, s * 0.09)));
+    p.setBrush(Qt::NoBrush);
+  // Handle standing above the lid.
+    p.drawLine(QPointF(s * 0.34, s * 0.30), QPointF(s * 0.40, s * 0.16));
+    p.drawLine(QPointF(s * 0.40, s * 0.16), QPointF(s * 0.60, s * 0.16));
+    p.drawLine(QPointF(s * 0.60, s * 0.16), QPointF(s * 0.66, s * 0.30));
+    // Lid, wider than the body so the two do not read as one shape.
+    p.drawLine(QPointF(s * 0.10, s * 0.30), QPointF(s * 0.90, s * 0.30));
+    // Tapered body.
+    p.drawLine(QPointF(s * 0.18, s * 0.30), QPointF(s * 0.26, s * 0.88));
+    p.drawLine(QPointF(s * 0.26, s * 0.88), QPointF(s * 0.74, s * 0.88));
+    p.drawLine(QPointF(s * 0.74, s * 0.88), QPointF(s * 0.82, s * 0.30));
+    // Two ribs, so an empty outline still reads as a bin rather than a box.
+    p.drawLine(QPointF(s * 0.40, s * 0.46), QPointF(s * 0.42, s * 0.72));
+    p.drawLine(QPointF(s * 0.60, s * 0.46), QPointF(s * 0.58, s * 0.72));
+    p.end();
+    return bin;
+  };
+
+  QIcon bin;
+  bin.addPixmap(draw(ink), QIcon::Normal, QIcon::On);
+  // A second, faded rendering registered as the Disabled state rather than one
+  // icon swapped by the caller. Doing it this way means the enabled and
+  // disabled pixels can never disagree about the shape, and Qt picks the right
+  // one on its own -- including for hover and focus states, which a manual swap
+  // on setEnabled() would miss.
+  bin.addPixmap(draw(faded), QIcon::Disabled, QIcon::On);
+  return bin;
+}
+
+void MainWindow::updateResultIcons() {
+  // The folder glyph comes from the platform rather than being painted, so it
+  // matches the desktop's own icons. Requested fresh rather than cached because
+  // a themed QIcon resolves against the palette in force when it is painted, and
+  // the one cached during construction was resolved against the old palette.
+  QFileIconProvider provider;
+  revealBtn_->setIcon(provider.icon(QFileIconProvider::Folder));
+
+  // Red for the destructive action. Hue is fixed rather than derived from the
+  // palette, because no palette has a "danger" role and inventing one from the
+  // accent would produce something orange or pink on some desktops -- a
+  // destructive control that does not read as destructive.
+  //
+  // Lightness is picked per theme, though, and not scaled from a single red:
+  // the same value that is legible on a white bar becomes mud on a near-black
+  // one. Both are checked against the measured window background rather than
+  // assumed to clear a contrast ratio.
+  const bool dark = relativeLuminance(palette().color(QPalette::Window)) <
+                    relativeLuminance(palette().color(QPalette::WindowText));
+  const QColor ink =
+      dark ? QColor(0xE5, 0x6A, 0x6A) : QColor(0xC0, 0x36, 0x2C);
+  // Disabled: the same hue pulled toward the background, so it reads as "not
+  // available" instead of as a dimmer warning.
+  const QColor faded = mixToward(ink, palette().color(QPalette::Window), 0.55);
+  trashBtn_->setIcon(
+      paintTrashGlyph(trashBtn_->iconSize().width(), ink, faded));
+}
 
 void MainWindow::updateThemeGlyph() {
   themeToggleBtn_->setIcon(
@@ -1154,10 +1391,10 @@ QPushButton:disabled { color: @muted; border-color: @border; }
     background: @disabled; color: @muted; border-color: @border;
 }
 
-/* The general button rule pads 6px/14px for a text label. This one holds only
-   an icon at a fixed square size, so the padding has to go or it squeezes the
-   glyph and inflates the widget. */
-#themeToggleBtn { padding: 0; }
+/* The general button rule pads 6px/14px for a text label. The three top-bar
+   controls hold only an icon at a fixed square size, so the padding has to go or
+   it squeezes the glyph and inflates the widget. */
+#themeToggleBtn, #revealBtn, #trashBtn { padding: 0; }
 
 QProgressBar {
     background: @field; border: 1px solid @border; border-radius: 6px;
@@ -1289,4 +1526,5 @@ void MainWindow::applyTheme() {
   qApp->setPalette(palette());
 
   updateThemeGlyph();
+  updateResultIcons();
 }

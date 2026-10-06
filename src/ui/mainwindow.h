@@ -13,7 +13,9 @@
 #include <QPalette>
 
 class QAction;
+class QColor;
 class QGroupBox;
+class QIcon;
 class QLabel;
 class QLineEdit;
 class QListWidget;
@@ -41,6 +43,8 @@ private slots:
     void startSearch();
     void stopSearch();
     void openResult(QListWidgetItem* item);
+    void revealResult();
+    void trashResult();
     void toggleTheme();
     void onUpdateCheckFinished(app::CheckOutcome outcome);
 
@@ -54,6 +58,12 @@ private:
                           const QString& error);
     void renderResults(const std::vector<core::SearchResult>& results);
     void updateActions();
+    // Enables or disables the reveal/trash pair. Split from updateActions()
+    // because it also depends on the grid selection, which changes on its own
+    // schedule -- on click, and after a delete takes the row away.
+    void updateResultActions();
+    // The selected result, or null when nothing usable is selected.
+    QListWidgetItem* currentResult() const;
     void showPreview(const QString& path);
     void setBusy(bool busy);
 
@@ -71,6 +81,15 @@ private:
     QString askForDirectory(const QString& title);
     QString askForFile(const QString& title, const QString& filter);
     void updateThemeGlyph();
+    // Repaints the two top-bar tool icons. Kept apart from updateThemeGlyph()
+    // because they follow the palette for a different reason: the bin's ink is
+    // sampled from it, while the toggle's glyph is a fixed shape whose colour
+    // only changes with the mode. Both have to run on a theme change.
+    void updateResultIcons();
+    // Draws the bin twice, in `ink` and in `faded`, and registers them as the
+    // Normal and Disabled states of one QIcon.
+    static QIcon paintTrashGlyph(int logicalSize, const QColor& ink,
+                                 const QColor& faded);
     // Builds the menu bar. Its real job is giving the update check a permanent
     // home: without somewhere to undo the opt-out, "never check again" is a
     // one-way door that can only be reopened by reinstalling.
@@ -104,8 +123,13 @@ private:
     QLabel* preview_ = nullptr;
     QLabel* stats_ = nullptr;
     QListWidget* results_ = nullptr;
-    QSpinBox* thresholdSpin_ = nullptr;
+    // Top-bar controls, in the order they appear: theme, reveal, delete. The
+    // latter two act on the current selection rather than on a fixed image,
+    // which is what makes them usable against a grid holding a whole result set.
     QPushButton* themeToggleBtn_ = nullptr;
+    QPushButton* revealBtn_ = nullptr;
+    QPushButton* trashBtn_ = nullptr;
+    QSpinBox* thresholdSpin_ = nullptr;
     // The File menu's library and query actions. Held as members so
     // updateActions() can disable them for the same window a search worker is
     // reading index_: browseLibrary() -> tryLoadIndex() replaces the vector
