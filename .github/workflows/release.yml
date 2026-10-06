@@ -280,7 +280,7 @@ jobs:
         ls -lh "$DMG"
 
     - name: Upload Release Asset
-      if: github.event_//release'
+      if: github.event_name == 'release'
       uses: softprops/action-gh-release@v2
       with:
         files: lucidgrasp-macos-*.dmg
