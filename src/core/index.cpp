@@ -32,9 +32,6 @@ constexpr quint32 kVersion = 2;
 // Guards against pathological nesting in a whole-filesystem scan.
 constexpr int kMaxScanDepth = 64;
 
-// Directories visited between discovery progress reports.
-constexpr int kDiscoveryReportInterval = 256;
-
 const QSet<QString> &systemDirNames()
 {
   // Names are lower-case on every platform; the resolve-path check in

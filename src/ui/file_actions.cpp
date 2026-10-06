@@ -48,6 +48,14 @@ void deliver(const RevealDone &done, RevealOutcome outcome) {
   });
 }
 
+// Shown when the file manager would not select the file but its folder can
+// still be opened. Not an error: the user gets their folder either way, so this
+// reports FolderOnly rather than Failed.
+void launchFallback(const QString &path, const RevealDone &done) {
+  openContainingFolder(path);
+  deliver(done, RevealOutcome::FolderOnly);
+}
+
 }  // namespace
 
 void revealInFileManager(const QString &path, const RevealDone &done) {
@@ -62,16 +70,20 @@ void revealInFileManager(const QString &path, const RevealDone &done) {
   // needs the native separators with the comma intact -- going through a URL
   // loses the select verb and just opens the folder.
   const QString native = QDir::toNativeSeparators(info.absoluteFilePath());
-  QProcess::startDetached(QStringLiteral("explorer.exe"),
-                          QStringList{QStringLiteral("/select,%1").arg(native)});
-  deliver(done, RevealOutcome::Selected);
+  if (QProcess::startDetached(QStringLiteral("explorer.exe"),
+                              QStringList{QStringLiteral("/select,%1").arg(native)}))
+    deliver(done, RevealOutcome::Selected);
+  else
+    launchFallback(path, done);
 
 #elif defined(Q_OS_MACOS)
   // -R reveals, and unlike opening the folder it puts the file in the selection
   // and scrolls to it.
-  QProcess::startDetached(QStringLiteral("/usr/bin/open"),
-                          QStringList{QStringLiteral("-R"), path});
-  deliver(done, RevealOutcome::Selected);
+  if (QProcess::startDetached(QStringLiteral("/usr/bin/open"),
+                              QStringList{QStringLiteral("-R"), path}))
+    deliver(done, RevealOutcome::Selected);
+  else
+    launchFallback(path, done);
 
 #else
   // org.freedesktop.FileManager1 is the freedesktop.org standard for exactly
@@ -87,8 +99,7 @@ void revealInFileManager(const QString &path, const RevealDone &done) {
   if (!bus.isConnected()) {
     // No session bus at all: an SSH session, a container, or a bare
     // VT. Nothing can be asked to select anything here.
-    openContainingFolder(path);
-    deliver(done, RevealOutcome::FolderOnly);
+    launchFallback(path, done);
     return;
   }
 
@@ -115,11 +126,10 @@ void revealInFileManager(const QString &path, const RevealDone &done) {
                      // absent, timeout -- degrades to opening the folder rather
                      // than to nothing. The folder is almost always useful even
                      // when the selection is not.
-                     const bool ok = !w->isError();
-                     if (!ok)
-                       openContainingFolder(path);
-                     deliver(done, ok ? RevealOutcome::Selected
-                                      : RevealOutcome::FolderOnly);
+                     if (!w->isError())
+                       deliver(done, RevealOutcome::Selected);
+                     else
+                       launchFallback(path, done);
                      w->deleteLater();
                    });
   // Deliberately nothing returned: the D-Bus reply has not arrived yet, so the
@@ -174,20 +184,40 @@ bool moveToTrash(const QString &path, QString *error) {
   return true;
 
 #elif defined(Q_OS_MACOS)
-  // NSFileManager's trashItemAtURL is the supported route. There is no public
-  // command-line tool for it, so osascript asks Finder directly. `with timeout`
-  // guards the case where Finder is busy and would otherwise leave this hanging
-  // on the GUI thread.
-  const QString apath = QString(path);
-  const QString script =
-      QStringLiteral("tell application \"Finder\" to delete POSIX file \"%1\"");
-  const QString quoted =
-      apath.replace(QStringLiteral("\\"), QStringLiteral("\\\\"))
-          .replace(QStringLiteral("\""), QStringLiteral("\\\""));
-
+  // NSFileManager's trashItemAtURL is the supported route, and no command-line
+  // tool reaches it, so osascript asks Finder to do it instead.
+  //
+  // The path is passed as an argv element, not interpolated into the script.
+  // osascript hands everything after the script to `on run argv`, so the path
+  // arrives as a plain string and never goes through the AppleScript parser: a
+  // filename containing a quote, a backslash, or the words "end run" cannot
+  // change what runs. QProcess hands the argument vector straight to exec, so
+  // there is no shell to re-parse it either.
+  //
+  // The previous version spliced the path into the script with %1 and escaped
+  // backslashes and quotes by hand. That was more code for a weaker guarantee,
+  // and it did not compile: `apath` was declared const and QString::replace() has
+  // no const overload. It passed every review because the whole Q_OS_MACOS
+  // branch is preprocessed out on both Linux and Windows, so nothing compiled it
+  // until the macOS runner first ran.
+  //
+  // `POSIX file` is coerced in a `set` outside the tell block on purpose:
+  // inside one the coercion could resolve against Finder's own terminology
+  // instead of the standard addition, and the failure would then read as Finder
+  // refusing the delete.
+  //
+  // First use on a Mac raises a system prompt asking permission for osascript to
+  // control Finder. That is macOS's automation policy and no Finder-based route
+  // avoids it; it is not an error, and refusing it makes this branch report the
+  // failure below.
   QProcess p;
   p.start(QStringLiteral("/usr/bin/osascript"),
-          {QStringLiteral("-e"), script.arg(quoted)});
+          {QStringLiteral("-e"),
+           QStringLiteral("on run argv\n"
+                          "  set theFile to POSIX file (item 1 of argv)\n"
+                          "  tell application \"Finder\" to delete theFile\n"
+                          "end run"),
+           path});
   if (!p.waitForFinished(15000))
     return fail(QStringLiteral("The system trash could not be reached."));
   if (p.exitCode() != 0)
