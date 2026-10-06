@@ -63,10 +63,22 @@ jobs:
         # longer exists and failing the same way.
         brew install opencv@4
 
+    - name: Generate app icon
+      run: |
+        # Before configure, because CMake needs to see the .icns in order to add
+        # it to the bundle's resources. Failing here names the problem; failing
+        # later inside CMake does not.
+        chmod +x scripts/make-icns.sh
+        ./scripts/make-icns.sh lucidgrasp.png lucidgrasp.icns
+        # Prove the plist CMake will render names the file that exists, rather
+        # than discovering the mismatch after the bundle is built.
+        test -s lucidgrasp.icns
+
     - name: Build Project
       run: |
         cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
-          -DOpenCV_DIR="$(brew --prefix opencv@4)/lib/cmake/opencv4"
+          -DOpenCV_DIR="$(brew --prefix opencv@4)/lib/cmake/opencv4" \
+          -DLUCIDGRASP_ICNS="$PWD/lucidgrasp.icns"
         cmake --build build -j$(sysctl -n hw.ncpu)
 
     - name: Self Test
@@ -86,6 +98,19 @@ jobs:
         APP=build/LucidGrasp.app
         MACOS_DIR="$APP/Contents/MacOS"
         FRAMEWORKS="$APP/Contents/Frameworks"
+
+        # The bundle is worthless without its icon, and CMake only warns when the
+        # .icns is absent, so this is checked rather than assumed. A release that
+        # shipped a blank-icon DMG would be indistinguishable from a working one
+        # in the CI log.
+        if [ ! -s "$APP/Contents/Resources/lucidgrasp.icns" ]; then
+          echo "ERROR: the bundle carries no icon."
+          echo "  Contents/Resources:"
+          ls -la "$APP/Contents/Resources" 2>/dev/null || echo "  (does not exist)"
+          echo "  CFBundleIconFile is: $(plutil -extract CFBundleIconFile raw "$APP/Contents/Info.plist" 2>/dev/null || echo '(unset)')"
+          exit 1
+        fi
+        echo "Icon: $(wc -c <"$APP/Contents/Resources/lucidgrasp.icns" | tr -d ' ') bytes"
 
         # macdeployqt copies Qt's frameworks and plugins into the bundle and
         # rewrites the binary's load paths to point at them. It knows nothing
