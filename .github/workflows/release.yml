@@ -1,10 +1,8 @@
 name: Build and Release
 
 on:
-  push:
-    branches:
-      - main
-  pull_request:
+  release:
+    types: [published]
 
 permissions:
   contents: write
@@ -172,11 +170,34 @@ jobs:
         (Get-Content installer.iss -Raw) -replace '(?m)^AppVersion=[^\r\n]*', "AppVersion=$version" | Set-Content installer.iss -NoNewline
         & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
 
+    - name: Create Chocolatey Package
+      if: github.event_name == 'release'
+      shell: pwsh
+      run: |
+        # Create a temporary folder for the choco package
+        $chocoDir = "choco-pkg"
+        New-Item -ItemType Directory -Path $chocoDir -Force
+        Copy-Item scripts\packaging\lucidgrasp.nuspec $chocoDir\
+
+        # Chocolatey expects the installer in a 'tools' folder
+        New-Item -ItemType Directory -Path "$chocoDir\tools" -Force
+        Copy-Item package\LucidGrasp\LucidGrasp.exe $chocoDir\tools\LucidGrasp_Setup_x64.exe
+
+        # Pack the package
+        cd $chocoDir
+        choco pack
+
+        # Move the resulting .nupkg to the main package folder
+        Move-Item *.nupkg ../package/
+        cd ..
+
     - name: Upload Release Asset
       if: github.event_name == 'release'
       uses: softprops/action-gh-release@v2
       with:
-        files: package/LucidGrasp_Setup_x64.exe
+        files: |
+          package/LucidGrasp_Setup_x64.exe
+          package/*.nupkg
 
   build-macos:
     runs-on: macos-15-intel
