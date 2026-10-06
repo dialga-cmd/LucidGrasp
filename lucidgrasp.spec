@@ -16,21 +16,19 @@ BuildRequires:  gcc-c++
 LucidGrasp is a high-performance image search engine built to identify and match visual media.
 
 %prep
-# SCM Sync already puts us in the source root.
-# We just ensure we are there.
+# SCM Sync puts us in the source root.
+# We explicitly set the build directory to avoid any path confusion.
 cd %{_builddir}
 
 %build
-# We create the build directory in the root
-mkdir -p build
-cd build
-# We use the absolute path to the source root to avoid any ".." confusion
-cmake %{_builddir} -DCMAKE_BUILD_TYPE=Release
-make -j$(nproc)
+# Use -S . to explicitly define the source directory as the current directory
+# and -B build to create the build directory.
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j$(nproc)
 
 %install
-cd build
-make install DESTDIR=%{buildroot}
+# Use the install target from the build directory
+cmake --install build --prefix /usr
 
 %files
 /usr/bin/LucidGrasp
