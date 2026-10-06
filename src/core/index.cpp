@@ -8,6 +8,7 @@
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QImage>
 #include <QImageReader>
 #include <QRegularExpression>
@@ -541,6 +542,17 @@ void ImageIndex::clear() {
   root_.clear();
   entries_.clear();
   errors_ = 0;
+}
+
+bool ImageIndex::removeEntry(const QString &relPath) {
+  const auto it = std::find_if(entries_.begin(), entries_.end(),
+                               [&](const IndexEntry &e) {
+                                 return e.relPath == relPath;
+                               });
+  if (it == entries_.end())
+    return false;
+  entries_.erase(it);
+  return true;
 }
 
 } // namespace core

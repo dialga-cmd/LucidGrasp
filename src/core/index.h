@@ -61,6 +61,14 @@ public:
   size_t size() const { return entries_.size(); }
   void clear();
 
+  // Drops the entry whose relPath matches, and reports whether there was one.
+  //
+  // Matched on relPath rather than an absolute path because that is what an
+  // entry stores; the caller has a SearchResult, which carries both, and
+  // resolving it back through root_ here keeps the two spellings from drifting
+  // into a lookup that silently finds nothing.
+  bool removeEntry(const QString &relPath);
+
 private:
   QString root_;
   std::vector<IndexEntry> entries_;
