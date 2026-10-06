@@ -79,7 +79,23 @@ fi
 rm -f "$OUT"
 mkdir -p "$(dirname "$OUT")"
 
-if ! iconutil -c icns "$ICONSET" "$OUT"; then
+# The output path goes to -o, never as a second positional argument. The
+# synopsis is
+#
+#     iconutil -c {icns | iconset} [ -o file ] file [icon-name]
+#
+# so that trailing argument is an icon *name*, not a destination. Passing the
+# filename there makes iconutil go looking for an icon resource of that name and
+# fail with
+#
+#     Icon resource not found in asset catalog with name 'lucidgrasp.icns'
+#
+# which reads like a problem with the source images and is not: the iconset was
+# complete and correct. This cost two CI runs, the first of which reported
+# nothing at all because CMake was swallowing the message.
+echo "make-icns.sh: iconutil -c icns -o $OUT $ICONSET"
+
+if ! iconutil -c icns -o "$OUT" "$ICONSET"; then
     echo "make-icns.sh: iconutil failed. Its own message is above; the set it was" >&2
     echo "  given had these files:" >&2
     ls -la "$ICONSET" >&2
