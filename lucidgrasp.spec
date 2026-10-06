@@ -8,7 +8,7 @@ URL:            https://github.com/dialga-cmd/LucidGrasp
 Source0:        %{url}/archive/refs/tags/v%{version}.tar.gz
 
 BuildRequires:  cmake
-BuildRequires:  qt6-qtbase-devel
+BuildRequires:  qt6-base-devel
 BuildRequires:  opencv-devel
 BuildRequires:  gcc-c++
 
