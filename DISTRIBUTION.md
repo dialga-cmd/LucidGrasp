@@ -3,9 +3,10 @@
 How to make LucidGrasp installable through every channel people actually use.
 Written against the repo as of `f4283d7` / `v1.2.3`, October 2026.
 
-Status legend: **[ready]** nothing blocks it — **[account]** needs a free
-account you create first — **[money]** needs a paid developer program —
-**[you]** I cannot do this part for policy reasons, you must.
+Status legend: **[ready]** nothing blocks it — **[account]** a free account
+you create first (sign-up link in the row, full list in §0.1) — **[you]** I
+cannot do this part for policy reasons, you must. No channel on this list
+costs money; paid ones were removed.
 
 ---
 
@@ -14,20 +15,18 @@ account you create first — **[money]** needs a paid developer program —
 | Channel | What the user types | Gate | Status |
 |---|---|---|---|
 | AppImage | download, `chmod +x`, run | none | **[ready]** |
-| AUR | `yay -S lucidgrasp` | none (uncurated) | **[account]** AUR account |
 | winget | `winget install dialga-cmd.LucidGrasp` | PR + review | **[ready]** |
-| Scoop | `scoop install lucidgrasp` | none (own bucket) | **[account]** |
-| Chocolatey | `choco install lucidgrasp` | moderation + VT scan | **[account]** |
-| OBS (apt/zypper) | `apt install lucidgrasp` *after adding repo* | free account | **[account]** |
-| Launchpad PPA | `add-apt-repository ppa:dialga-cmd/lucidgrasp` | free account | **[account]** |
-| Fedora Copr | `dnf copr enable dialga-cmd/lucidgrasp` | free account | **[account]** |
-| Snap | `snap install lucidgrasp` | free account, auto review | **[account]** |
+| Scoop | `scoop install lucidgrasp` | none (own bucket; your GitHub) | **[ready]** |
+| AUR | `yay -S lucidgrasp` | none (uncurated) | **[account]** — [create AUR account](https://aur.archlinux.org/register) |
+| Chocolatey | `choco install lucidgrasp` | moderation + VT scan | **[account]** — [create account](https://community.chocolatey.org/account/Register) |
+| OBS (apt/zypper) | `apt install lucidgrasp` *after adding repo* | free account | **[account]** — [sign up](https://idp-portal.suse.com/univention/self-service/#page=createaccount) |
+| Launchpad PPA | `add-apt-repository ppa:dialga-cmd/lucidgrasp` | free account | **[account]** — [create account](https://login.launchpad.net/+new_account) |
+| Fedora Copr | `dnf copr enable dialga-cmd/lucidgrasp` | free account | **[account]** — [create Fedora account](https://accounts.fedoraproject.org/) |
+| Snap | `snap install lucidgrasp` | free account, auto review | **[account]** — [create Ubuntu One account](https://login.ubuntu.com/+new_account) |
 | Nixpkgs | `nix run nixpkgs#lucidgrasp` | review PR | **[ready]** |
 | Flathub | `flatpak install flathub io.github.dialga_cmd.LucidGrasp` | review PR + AI policy | **[you]** |
-| Homebrew | `brew install --cask lucidgrasp` | Gatekeeper notarization | **[money]** |
-| Debian proper | `apt install lucidgrasp` (official) | ITP + DD sponsor | **[money]** time |
-| Microsoft Store | Get from Store | $19 Dev Center | **[money]** |
-| Mac App Store | App Store | $99 + sandbox rewrite | **[money]** |
+| Homebrew | `brew install dialga-cmd/tap/lucidgrasp` (source formula) | none (your tap, GitHub) | **[ready]** |
+| Debian proper | `apt install lucidgrasp` (official) | ITP + DD sponsor | time + sponsor, no money |
 
 **About `apt install`.** There is no third way. You either host your own APT
 repo that users add once (openSUSE Build Service, Launchpad PPA, or a repo you
@@ -35,6 +34,24 @@ build yourself), or you get into Debian's official archive — real `debian/`
 packaging against *system* Qt and OpenCV, an ITP bug report, and a Debian
 Developer willing to sponsor the upload. OBS is the realistic answer: free,
 builds `.deb` and `.rpm` from one source, hands back a GPG-signed repo.
+
+### 0.1 Account sign-up links
+
+Every channel that needs a new account, with the exact page where you create
+it. Channel sections repeat their own link below.
+
+| Platform | Sign-up link | Account is for |
+|---|---|---|
+| AUR | https://aur.archlinux.org/register | publishing `lucidgrasp` |
+| OBS (apt/zypper) | https://idp-portal.suse.com/univention/self-service/#page=createaccount | building + hosting the `.deb`/`.rpm` repo |
+| Launchpad PPA | https://login.launchpad.net/+new_account | creating `ppa:dialga-cmd/lucidgrasp` |
+| Fedora Copr | https://accounts.fedoraproject.org/ | `copr-cli` builds |
+| Snap | https://login.ubuntu.com/+new_account | registering the `lucidgrasp` snap name |
+| Chocolatey | https://community.chocolatey.org/account/Register | API key for `choco push` |
+
+The rest need no new account: winget, Scoop, Nixpkgs, and Flathub all go
+through the existing GitHub account, and Homebrew uses a personal tap under
+that same GitHub account.
 
 ---
 
@@ -470,16 +487,17 @@ git clone ssh://aur@aur.archlinux.org/lucidgrasp.git
 cd lucidgrasp && git add .SRCINFO PKGBUILD && git commit -m "lucidgrasp 1.2.3" && git push
 ```
 
-Register the name first at aur.archlinux.org. No review for new packages;
+Register the name first at the [AUR registration page](https://aur.archlinux.org/register). No review for new packages;
 there is a community deletion-request process if you abandon it.
 
 Updates are just a `pkgver` bump + `updpkgsums`, since `source=` already
 points at the GitHub tag. Automate it with a release-triggered workflow that
 pushes over SSH using a deploy key (§3.11).
 
-### 3.4 Scoop — **[account]**
+### 3.4 Scoop — **[ready]**
 
-A bucket is just a git repo of JSON manifests. Create
+No new account: the bucket is just a git repo of JSON manifests under your
+existing GitHub account. Create
 `github.com/dialga-cmd/scoop-bucket`, then:
 
 ```bash
@@ -523,7 +541,7 @@ review is gated but open.
 
 ### 3.5 Chocolatey — **[account]**
 
-Free account at chocolatey.org gives an API key. Package layout:
+Free account at [community.chocolatey.org](https://community.chocolatey.org/account/Register) gives an API key. Package layout:
 
 ```
 lucidgrasp.nuspec
@@ -546,8 +564,9 @@ since the project homepage is the repo.
 
 ### 3.6 openSUSE Build Service (real `apt install`) — **[account]**
 
-This is the answer to "how do I get `apt install lucidgrasp`". Free account at
-build.opensuse.org, `osc` CLI for uploads.
+This is the answer to "how do I get `apt install lucidgrasp`". Free account
+([OBS sign-up](https://idp-portal.suse.com/univention/self-service/#page=createaccount)),
+`osc` CLI for uploads.
 
 1. Create project `home:dialga-cmd:lucidgrasp`.
 2. Two source packages: a Debian source package (`.orig.tar.gz` +
@@ -580,7 +599,7 @@ fine for this use.
 
 ### 3.7 Launchpad PPA — **[account]**
 
-Ubuntu-only alternative to OBS. Free Launchpad account, create
+Ubuntu-only alternative to OBS. Free [Launchpad account](https://login.launchpad.net/+new_account), create
 `ppa:dialga-cmd/lucidgrasp`, upload a source package with `dput`. Users then
 get the familiar:
 
@@ -594,7 +613,7 @@ specifically want Ubuntu-only reach; OBS covers Ubuntu and everything else.
 
 ### 3.8 Fedora Copr — **[account]**
 
-Free Fedora account + `copr-cli`. Needs an SRPM (`.spec` + sources). Then:
+Free [Fedora account](https://accounts.fedoraproject.org/) + `copr-cli`. Needs an SRPM (`.spec` + sources). Then:
 
 ```bash
 copr-cli build lucidgrasp-1.2.3-1.src.rpm --project lucidgrasp
@@ -699,28 +718,12 @@ reading the code rather than guessing:
   above covers it; without it the reveal button silently degrades to the
   launch-fallback path.
 
-### 3.10 Homebrew — **[money]**
+### 3.10 Homebrew — **[ready]** (free source formula)
 
-Blocked as of **September 1, 2026**. From Homebrew's *Acceptable Casks*:
+No paid developer program. The official-cask door (Apple Developer Program,
+$99/yr, + notarization) is deliberately not on this list; the free route goes
+through a personal tap and needs only the GitHub account you already have.
 
-> *"On macOS, apps, installers and other executable artefacts that Gatekeeper
-> can assess must pass Homebrew's Gatekeeper checks and must not require
-> System Integrity Protection or Gatekeeper to be disabled or bypassed."*
-
-`lucidgrasp-macos-1.2.3.dmg` is ad-hoc signed and **not notarized**, so a cask
-pointing at it would be disabled. The other door is shut from the other side —
-the same docs state that *"a formula whose primary output is a native macOS
-`.app` bundle is not eligible"* for homebrew/core. So:
-
-- **Official cask** — requires the **Apple Developer Program ($99/yr)**,
-  Developer ID signing, and notarization (`xcrun notarytool submit
-  --wait`). Once the DMG is notarized, a cask is straightforward: `url` +
-  `sha256` + `app "LucidGrasp.app"`. This is the only path to
-  `brew install --cask lucidgrasp`.
-- **Personal tap, cask** — `brew tap dialga-cmd/tap`, no review, works today.
-  Homebrew still applies the quarantine attribute, so users hit "cannot be
-  opened because the developer cannot be verified" and must right-click →
-  Open. Friction, not failure.
 - **Personal tap, formula** — the option worth actually considering. A formula
   builds from source against `qt@6` and `opencv` from Homebrew (both ship
   bottles, so only LucidGrasp compiles). Locally-built files carry no
@@ -757,6 +760,11 @@ the same docs state that *"a formula whose primary output is a native macOS
   Put it in `github.com/dialga-cmd/homebrew-tap` under `Formula/`, then
   `brew install dialga-cmd/tap/lucidgrasp`.
 
+- **Personal tap, cask** — `brew tap dialga-cmd/tap`, no review, works today.
+  Homebrew still applies the quarantine attribute, so users hit "cannot be
+  opened because the developer cannot be verified" and must right-click →
+  Open. Friction, not failure.
+
 ### 3.11 Keeping them updated
 
 The version is already single-sourced from `project(LucidGrasp VERSION ...)`
@@ -792,16 +800,14 @@ depend on, and it is also what makes the AppImage's appimagetool step pass.
 Do it before any channel work.
 
 **Wave 2 — free accounts.** OBS (real `apt install`), Snap, Copr. Create the
-accounts, then build.
+accounts ([§0.1](DISTRIBUTION.md#01-account-sign-up-links)), then build.
 
-**Wave 3 — money or your own hands.** Flathub (you author it, see §3.9),
-Homebrew ($99 Apple Developer for the cask, or the source formula in a
-personal tap today), Debian proper (only worth pursuing if you want to find a
-sponsor — budget months).
+**Wave 3 — your own hands.** Flathub (you author it, see §3.9), Debian proper
+(only worth pursuing if you want to find a sponsor — budget months). Homebrew
+is already free via the source formula in a personal tap (§3.10).
 
-**Decide deliberately, and later:** Microsoft Store ($19 + MSIX packaging),
-Mac App Store ($99 + sandbox entitlements that fight a filesystem-scanning
-app), Nixpkgs (solid PR, but review queues run weeks to months).
+**Decide deliberately, and later:** Nixpkgs (solid PR, but review queues run
+weeks to months).
 
 ---
 
@@ -825,6 +831,6 @@ app), Nixpkgs (solid PR, but review queues run weeks to months).
 | `AppPublisher` in `installer.iss` | not set (winget needs it) |
 | Installer version source | workflow rewrites `AppVersion` from `CMAKE_PROJECT_VERSION` |
 | DMG contents | `LucidGrasp.app` at image root + `Applications` symlink |
-| Homebrew cask deadline | Gatekeeper enforcement active since 2026-09-01 |
+| Homebrew route | personal-tap formula (free); official cask excluded (paid, + Gatekeeper staple since 2026-09-01) |
 | `ubuntu-latest` migration | 24.04 → 26.04, Oct 19 – Nov 19 2026 |
 | `ubuntu-22.04` runner | deprecated 2026-09-17, retired 2027-04-17 (container images unaffected) |
