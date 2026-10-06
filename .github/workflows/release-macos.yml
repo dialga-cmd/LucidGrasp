@@ -134,8 +134,16 @@ jobs:
           ls "$QT_ROOT_DIR/bin" 2>/dev/null || echo "(no bin directory either)"
           exit 1
         fi
-        "$QT_ROOT_DIR/bin/macdeployqt" "$APP" \
-          -no-translations -no-strip -no-system-d3d-compiler
+        # -no-strip is the only option here. macdeployqt's own set is small:
+        # -help, -verbose, -no-plugins, -executable, -qmldir, -always-overwrite,
+        # -dmg, -use-debug-libs, -no-strip, -appstore-compliant, -hardened-runtime,
+        # -codesign and -sign-for-notarization. Anything else is an error
+        # rather than a warning, and this step originally passed
+        # -no-translations and -no-system-d3d-compiler, which belong to
+        # windeployqt over on the Windows runner -- harmless there, fatal here,
+        # where macdeployqt reads them as unknown arguments and refuses.
+        # Qt docs: doc.qt.io/qt-6/macos-deployment.html.
+        "$QT_ROOT_DIR/bin/macdeployqt" "$APP" -no-strip
 
         # OpenCV arrives from Homebrew and is linked by absolute path
         # (/opt/homebrew/... on arm64, /usr/local/... on Intel). Neither path
