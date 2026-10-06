@@ -38,7 +38,12 @@ jobs:
       uses: jurplel/install-qt-action@v4
       with:
         version: '6.5.*'
-        host: 'macos'
+        # 'mac', not 'macos'. aqt's host enum is exactly
+        # windows | windows_arm64 | mac | linux | linux_arm64 | all_os, and the
+        # action validates against it before doing anything, so 'macos' fails
+        # with a TypeError naming the accepted values rather than with anything
+        # about Qt. The OS name and the aqt host name are not the same string.
+        host: 'mac'
         target: 'desktop'
         # No arch. aqt names the macOS package directory clang_64 regardless of
         # the build's real architecture, so 'x86_64' resolves to nothing and the
