@@ -1,7 +1,7 @@
-# Fedora/RPM Spec File (lucidgrasp.spec)
+# SUSE/openSUSE Spec File (lucidgrasp.spec)
 Name:           lucidgrasp
 Version:        1.2.0
-Release:        1%{?dist}
+Release:        0
 Summary:        High-performance image search engine
 License:        MIT
 URL:            https://github.com/dialga-cmd/LucidGrasp
@@ -16,13 +16,17 @@ BuildRequires:  gcc-c++
 LucidGrasp is a high-performance image search engine built to identify and match visual media.
 
 %prep
+# SCM Sync already puts us in the source root.
+# We just ensure we are there.
 cd %{_builddir}
 
 %build
-mkdir build
+# We create the build directory in the root
+mkdir -p build
 cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release
-make %{?-get_mac_cpu} -j$(nproc)
+# We use the absolute path to the source root to avoid any ".." confusion
+cmake %{_builddir} -DCMAKE_BUILD_TYPE=Release
+make -j$(nproc)
 
 %install
 cd build
@@ -36,5 +40,5 @@ make install DESTDIR=%{buildroot}
 /usr/share/doc/lucidgrasp/README.md
 
 %changelog
-* Tue Oct 6 2026 dialga-cmd <adityaraj1234@duck.com> - 1.2.0-1
-- Initial release
+* Tue Oct 6 2026 dialga-cmd <adityaraj1234@duck.com> - 1.2.0-0
+- Initial OBS release
