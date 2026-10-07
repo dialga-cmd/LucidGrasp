@@ -60,6 +60,10 @@ parts:
       - libqt6dbus6t64
       - libqt6opengl6t64
       - qt6-qpa-plugins
+      # Platform plugins alone are not enough: Qt6 ships JPEG (and GIF/ICO/…)
+      # decoders as image-format *plugins*, and without them the app silently
+      # cannot read JPEGs at all.
+      - qt6-image-formats-plugins
       - libopencv-core406
       - libopencv-imgproc406
       - libopencv-imgcodecs406
