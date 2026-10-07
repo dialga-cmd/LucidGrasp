@@ -17,8 +17,8 @@ description: |
 
 grade: stable
 confinement: strict
-architectures:
-  - amd64
+platforms:
+  amd64:
 
 # The `gnome` extension provides the desktop launch wrapper, GTK theming,
 # portals and the Mesa/GL stack on core24. Qt itself is staged explicitly
