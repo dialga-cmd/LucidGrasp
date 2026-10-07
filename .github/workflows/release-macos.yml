@@ -3,13 +3,15 @@ name: Build macOS Release
 # Kept separate from release.yml rather than added as a third job there, because
 # the packaging steps differ enough that the shared job would be mostly
 # conditionals: Homebrew instead of apt, macdeployqt instead of windeployqt, and
-# hdiutil instead of Inno Setup. It triggers on the same events, so a release tag
-# still produces all three artifacts.
+# hdiutil instead of Inno Setup. A release tag produces both, which is why it is
+# release-only: release.yml's build-macos already covers every PR, so keeping
+# `pull_request` here too meant macOS was built and packaged twice per PR while
+# two jobs raced to upload a file with the same lucidgrasp-macos-*.dmg name.
 
 on:
   release:
     types: [published]
-  pull_request:
+  # Deliberately NOT pull_request. See above.
 
 permissions:
   contents: write
