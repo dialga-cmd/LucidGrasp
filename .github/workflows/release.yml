@@ -65,7 +65,10 @@ jobs:
         echo '#!/bin/sh' > AppDir/AppRun
         echo 'exec "$APPDIR/usr/bin/LucidGrasp" "$@"' >> AppDir/AppRun
         chmod +x AppDir/AppRun
-        ./appimagetool AppDir LucidGrasp-x86_64.AppImage
+        # appimagetool is an AppImage and the runner ships no libfuse.so.2, so
+        # a plain run aborts with "AppImages require FUSE to run". Extracting
+        # instead of mounting needs no FUSE.
+        APPIMAGE_EXTRACT_AND_RUN=1 ./appimagetool AppDir LucidGrasp-x86_64.AppImage
 
     - name: Update Scoop Bucket
       if: github.event_name == 'release'
@@ -308,7 +311,22 @@ jobs:
           exit 1
         fi
         DMG="lucidgrasp-macos-${VERSION}.dmg"
-        hdiutil create -volname "LucidGrasp ${VERSION}" -srcfolder "$STAGE" -ov -format UDZO "$DMG"
+        # hdiutil create intermittently fails on GitHub's macOS runners with
+        # "Resource busy" (actions/runner-images#7522) -- a runner fault, never
+        # a packaging one, and one that would otherwise fail a release at the
+        # very last step. Retry it rather than trusting the first attempt.
+        for attempt in 1 2 3 4 5; do
+          if hdiutil create -volname "LucidGrasp ${VERSION}" -srcfolder "$STAGE" -ov -format UDZO "$DMG"; then
+            break
+          fi
+          if [ "$attempt" -eq 5 ]; then
+            echo "ERROR: hdiutil create failed5 times"
+            exit 1
+          fi
+          echo "hdiutil create failed (attempt $attempt), retrying in 10s"
+          rm -f "$DMG"
+          sleep 10
+        done
         hdiutil attach "$DMG" -nobrowse -mountpoint /tmp/lucidgrasp-verify
         if [ ! -d /tmp/lucidgrasp-verify/LucidGrasp.app ]; then
           echo "ERROR: the app is not at the root of the mounted image"

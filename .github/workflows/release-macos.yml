@@ -255,12 +255,29 @@ jobs:
         # Compressed UDZO and a fixed size: hdiutil's default is a sparse image
         # whose apparent capacity is the whole disk, which downloads as a
         # multi-gigabyte file.
-        hdiutil create \
-          -volname "LucidGrasp ${VERSION}" \
-          -srcfolder "$STAGE" \
-          -ov \
-          -format UDZO \
-          "$DMG"
+        #
+        # Retried because hdiutil create fails intermittently on GitHub's macOS
+        # runners with "Resource busy" (actions/runner-images#7522), and this
+        # step only ever runs on release day -- exactly where a runner flake
+        # must not be able to sink the release.
+        for attempt in 1 2 3 4 5; do
+          if hdiutil create \
+            -volname "LucidGrasp ${VERSION}" \
+            -srcfolder "$STAGE" \
+            -ov \
+            -format UDZO \
+            "$DMG"; then
+            break
+          fi
+          if [ "$attempt" -eq 5 ]; then
+            echo "ERROR: hdiutil create failed5 times"
+            grep VERSION build/CMakeCache.txt || true
+            exit 1
+          fi
+          echo "hdiutil create failed (attempt $attempt), retrying in 10s"
+          rm -f "$DMG"
+          sleep 10
+        done
 
         # A DMG that hdiutil reports success on can still be unattachable, and
         # that is only visible by attaching it, so it is actually attached.

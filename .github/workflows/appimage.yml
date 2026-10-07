@@ -54,7 +54,12 @@ jobs:
 
       - name: Package AppImage
         run: |
-          ./appimagetool AppDir LucidGrasp-x86_64.AppImage
+          # appimagetool is itself an AppImage, and the runner has no
+          # libfuse.so.2, so a plain run dies with "dlopen(): error loading
+          # libfuse.so.2 / AppImages require FUSE to run" before it ever looks
+          # at the AppDir. APPIMAGE_EXTRACT_AND_RUN unpacks to a temp dir and
+          # executes instead of mounting, which needs no FUSE at all.
+          APPIMAGE_EXTRACT_AND_RUN=1 ./appimagetool AppDir LucidGrasp-x86_64.AppImage
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4

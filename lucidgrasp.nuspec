@@ -1,6 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Chocolatey Package Manifest (lucidgrasp.nuspec) -->
-<package xmlns="http://chocolatey.org/schema/chocolatey">
+<!-- The namespace must be one Chocolatey's NuGet fork recognises: its
+     ManifestSchemaUtility accepts only schemas.microsoft.com/packaging
+     2010/07, 2011/08, 2011/10, 2012/06, 2013/01, 2013/05 and 2015/06.
+     Anything else, including the chocolatey.org/schema/chocolatey URL this
+     manifest used to carry, makes choco pack abort with "The schema version
+     of 'lucidgrasp' is incompatible with version ... of NuGet" and produce no
+     .nupkg at all. 2013/05 is the newest one stock nuget.exe also knows, so
+     the manifest stays packable either way. -->
+<package xmlns="http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd">
   <metadata>
     <id>lucidgrasp</id>
     <version>1.2.3</version>
