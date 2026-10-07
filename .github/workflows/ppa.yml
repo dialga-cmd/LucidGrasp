@@ -114,4 +114,5 @@ jobs:
 
       - name: Dry-run note
         if: github.event_name == 'workflow_dispatch' && inputs.publish != true
-        run: echo "::notice::Dry-run complete: source package built and signed, not uploaded."
+        run: |
+          echo "::notice::Dry-run complete - source package built and signed, not uploaded."
