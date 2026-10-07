@@ -3,9 +3,6 @@ name: Publish to Snap Store
 on:
   release:
     types: [published]
-  # Build the snap and run the headless self-test inside it on every PR. The
-  # publish step below is gated on release/manual dispatch, so a PR can never
-  # reach the store.
   pull_request:
   workflow_dispatch:
     inputs:
@@ -25,11 +22,6 @@ jobs:
   snap:
     name: Snap Store
     runs-on: ubuntu-latest
-    # Healthy builds take ~7 min. A runner with a degraded route to Canonical's
-    # mirrors once crawled for 51+ min (14.5 min creating the base instance,
-    # then 1-3 min PER stage-package) and was still going when it was cancelled;
-    # without this it would have sat for GitHub's 6-hour default. Fail fast so
-    # the fix is "re-run", not "wait".
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -65,7 +57,6 @@ jobs:
           snap run --shell lucidgrasp -c 'echo LD_LIBRARY_PATH="$LD_LIBRARY_PATH"; ldd "$SNAP/usr/bin/LucidGrasp" | grep "not found" || echo none'
           echo "--- Qt plugin discovery inside the snap namespace ---"
           snap run --shell lucidgrasp -c 'env | grep -i "^QT" | sort; echo "QLibraryInfo default: /usr/lib/x86_64-linux-gnu/qt6/plugins ->"; ls -d /usr/lib/x86_64-linux-gnu/qt6/plugins 2>&1; echo "staged:"; ls "$SNAP/usr/lib/x86_64-linux-gnu/qt6/plugins" 2>&1'
-          # Boots the whole app (indexing + matching) headless.
           QT_QPA_PLATFORM=offscreen snap run lucidgrasp --selftest
           echo "--- self-test corpus (left behind on purpose) ---"
           snap run --shell lucidgrasp -c 'ls -la /tmp/lucidgrasp_selftest_*/library 2>&1'

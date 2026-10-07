@@ -1,18 +1,4 @@
 #!/usr/bin/env bash
-#
-# Builds lucidgrasp.icns from lucidgrasp.png for the macOS application bundle.
-#
-# This lives in a script rather than in CMakeLists.txt on purpose. Generating the
-# icon means shelling out to sips and iconutil, and doing that inside
-# execute_process() at configure time makes a failure read as "CMake could not
-# configure", with the tool's own message suppressed by OUTPUT_QUIET. That is
-# exactly how the first version failed: `iconutil failed to produce
-# lucidgrasp.icns`, with no indication of why and nothing in the log to act on.
-#
-# Kept as a script so it runs where its output is visible, exits with a real
-# status, and can be run by hand on a Mac to reproduce a CI failure.
-#
-# Usage: ./make-icns.sh [source.png] [output.icns]
 
 set -euo pipefail
 
@@ -37,17 +23,11 @@ for tool in sips iconutil; do
     fi
 done
 
-# iconutil only accepts a directory whose name ends in .iconset, and refuses to
-# compile a set that is missing any of its ten required renditions or that holds
-# anything else. So it is built in its own scratch directory rather than in the
-# build tree, where a stray file would be silently fatal.
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 ICONSET="$WORK/lucidgrasp.iconset"
 mkdir -p "$ICONSET"
 
-# Each logical size needs a 1x and a 2x rendition; Finder picks between them per
-# display density. The 512@2x is the 1024px one that shows up in the Dock.
 for size in 16 32 128 256 512; do
     for scale in 1 2; do
         px=$((size * scale))
@@ -75,24 +55,9 @@ if [ "$actual" != "$expected" ]; then
     exit 1
 fi
 
-# iconutil will not overwrite an existing output file.
 rm -f "$OUT"
 mkdir -p "$(dirname "$OUT")"
 
-# The output path goes to -o, never as a second positional argument. The
-# synopsis is
-#
-#     iconutil -c {icns | iconset} [ -o file ] file [icon-name]
-#
-# so that trailing argument is an icon *name*, not a destination. Passing the
-# filename there makes iconutil go looking for an icon resource of that name and
-# fail with
-#
-#     Icon resource not found in asset catalog with name 'lucidgrasp.icns'
-#
-# which reads like a problem with the source images and is not: the iconset was
-# complete and correct. This cost two CI runs, the first of which reported
-# nothing at all because CMake was swallowing the message.
 echo "make-icns.sh: iconutil -c icns -o $OUT $ICONSET"
 
 if ! iconutil -c icns -o "$OUT" "$ICONSET"; then

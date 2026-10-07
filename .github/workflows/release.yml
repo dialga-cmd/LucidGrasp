@@ -3,14 +3,6 @@ name: Build and Release
 on:
   release:
     types: [published]
-  # Every PR builds on all three platforms, runs the self-test AND runs the
-  # packaging steps (tarball, AppImage, windeployqt + Inno Setup, choco pack,
-  # macdeployqt + DMG), because packaging is where breakage actually hides and
-  # a step that only ever runs on release day is a step nobody notices is dead.
-  #
-  # Everything that publishes is still gated on github.event_name == 'release':
-  # the Scoop bucket push (needs BUCKET_TOKEN) and every Upload Release Asset
-  # step. A PR can build artifacts but can never ship one.
   pull_request:
 
 permissions:
@@ -19,8 +11,6 @@ permissions:
 jobs:
   build-linux:
     runs-on: ubuntu-latest
-    # Healthy: build + self-test + tarball + AppImage ≈ 10-20 min. Anything
-    # past an hour is a wedged runner, not a slow build.
     timeout-minutes: 60
 
     steps:
@@ -65,17 +55,11 @@ jobs:
         cp build/LucidGrasp AppDir/usr/bin/
         cp lucidgrasp.png AppDir/usr/share/icons/hicolor/256x256/apps/io.github.dialga_cmd.LucidGrasp.png
         cp io.github.dialga_cmd.LucidGrasp.desktop AppDir/usr/share/applications/io.github.dialga_cmd.LucidGrasp.desktop
-        # appimagetool globs the AppDir ROOT (non-recursively) for *.desktop and
-        # then for <Icon>.png; it never looks in usr/share, and without the root
-        # copies it dies with "Desktop file not found, aborting".
         cp io.github.dialga_cmd.LucidGrasp.desktop AppDir/
         cp lucidgrasp.png AppDir/io.github.dialga_cmd.LucidGrasp.png
         echo '#!/bin/sh' > AppDir/AppRun
         echo 'exec "$APPDIR/usr/bin/LucidGrasp" "$@"' >> AppDir/AppRun
         chmod +x AppDir/AppRun
-        # appimagetool is an AppImage and the runner ships no libfuse.so.2, so
-        # a plain run aborts with "AppImages require FUSE to run". Extracting
-        # instead of mounting needs no FUSE.
         APPIMAGE_EXTRACT_AND_RUN=1 ./appimagetool AppDir LucidGrasp-x86_64.AppImage
 
     - name: Update Scoop Bucket
@@ -114,8 +98,6 @@ jobs:
 
   build-windows:
     runs-on: windows-latest
-    # Healthy: ~4 min. windeployqt/Inno Setup/choco hangs shouldn't hold the
-    # job for GitHub's 6-hour default.
     timeout-minutes: 45
 
     steps:
@@ -191,37 +173,24 @@ jobs:
     - name: Create Chocolatey Package
       shell: pwsh
       run: |
-        # Create a temporary folder for the choco package
         $chocoDir = "choco-pkg"
         New-Item -ItemType Directory -Path $chocoDir -Force
         Copy-Item lucidgrasp.nuspec $chocoDir\
 
-        # Re-read the version instead of reusing $version from the installer
-        # step: every `run:` is its own pwsh process, so nothing set in an
-        # earlier step exists here. It used to interpolate an empty $version and
-        # write <version></version> into the nuspec, which choco pack rejects --
-        # invisible until now because this step only ever ran on release day.
         $cache = Get-Content build\CMakeCache.txt
         $match = $cache | Select-String '^CMAKE_PROJECT_VERSION:STATIC=(.+)$'
         if (-not $match) { throw "CMAKE_PROJECT_VERSION not found in CMakeCache.txt" }
         $version = $match.Matches[0].Groups[1].Value
         (Get-Content "$chocoDir\lucidgrasp.nuspec" -Raw) -replace '<version>[^<]*</version>', "<version>$version</version>" | Set-Content "$chocoDir\lucidgrasp.nuspec" -NoNewline
 
-        # Chocolatey expects the installer in a 'tools' folder
         New-Item -ItemType Directory -Path "$chocoDir\tools" -Force
         Copy-Item package\LucidGrasp\LucidGrasp.exe $chocoDir\tools\LucidGrasp_Setup_x64.exe
 
-        # The nuspec declares <file source="LucidGrasp_Setup_x64.exe">, and a
-        # nuspec's file sources are relative to the nuspec itself. The real
-        # Inno Setup output therefore has to sit next to it, or choco pack
-        # resolves the source to nothing.
         Copy-Item package\LucidGrasp_Setup_x64.exe $chocoDir\LucidGrasp_Setup_x64.exe
 
-        # Pack the package
         cd $chocoDir
         choco pack
 
-        # Move the resulting .nupkg to the main package folder
         Move-Item *.nupkg ../package/
         cd ..
 
@@ -235,8 +204,6 @@ jobs:
 
   build-macos:
     runs-on: macos-15-intel
-    # Healthy: ~8 min, and this job already retries hdiutil "Resource busy".
-    # A hung hdiutil or brew shouldn't run for 6 hours.
     timeout-minutes: 45
 
     steps:
@@ -325,10 +292,6 @@ jobs:
           exit 1
         fi
         DMG="lucidgrasp-macos-${VERSION}.dmg"
-        # hdiutil create intermittently fails on GitHub's macOS runners with
-        # "Resource busy" (actions/runner-images#7522) -- a runner fault, never
-        # a packaging one, and one that would otherwise fail a release at the
-        # very last step. Retry it rather than trusting the first attempt.
         for attempt in 1 2 3 4 5; do
           if hdiutil create -volname "LucidGrasp ${VERSION}" -srcfolder "$STAGE" -ov -format UDZO "$DMG"; then
             break

@@ -1,4 +1,3 @@
-# --- Build & Dependency Directories ---
 build/
 build-dir/
 build-stripped/
@@ -6,7 +5,6 @@ build-stripped/
 .cache/
 compile_commands.json
 
-# --- CMake/Build System ---
 CMakeCache.txt
 CMakeFiles/
 CMakeUserPresets.json
@@ -19,7 +17,6 @@ Makefile
 *.dll
 *.exe
 
-# --- IDEs & Editors ---
 .vscode/
 .idea/
 *.swp
@@ -27,13 +24,11 @@ Makefile
 *~
 .DS_Store
 
-# --- Application Data & Cache ---
 .image_search_index.bin
 *cache
 node_modules/
 .npm/
 
-# --- Third-party & Assets ---
 third_party/
 models/
 *.onnx
@@ -42,6 +37,5 @@ models/
 *.fix*
 brag-output/
 
-# --- System/OS ---
 Thumbs.db
 ehthumbs.db

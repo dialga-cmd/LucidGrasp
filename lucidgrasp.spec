@@ -1,4 +1,3 @@
-# SUSE/openSUSE Spec File (lucidgrasp.spec)
 Name:           lucidgrasp
 Version:        1.2.3
 Release:        1
@@ -10,8 +9,6 @@ Source0:        %{url}/archive/refs/heads/main.tar.gz
 BuildRequires:  cmake
 BuildRequires:  gcc-c++
 BuildRequires:  make
-# Qt6 development package name differs between distros:
-# openSUSE ships qt6-base-devel, Fedora/RHEL ship qt6-qtbase-devel.
 %if 0%{?suse_version}
 BuildRequires:  qt6-base-devel
 %else
@@ -24,17 +21,13 @@ Requires:       hicolor-icon-theme
 LucidGrasp is a high-performance image search engine built to identify and match visual media.
 
 %prep
-# GitHub branch archives unpack to a directory named after the ref: LucidGrasp-main
 %setup -q -n LucidGrasp-main
 
 %build
-# Use -S . to explicitly define the source directory as the current directory
-# and -B build to create the build directory.
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j$(nproc)
 
 %install
-# Install into the RPM build root; the prefix follows the distro default.
 DESTDIR=%{buildroot} cmake --install build --prefix %{_prefix}
 
 %files

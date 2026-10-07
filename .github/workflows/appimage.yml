@@ -10,9 +10,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    # Healthy builds are ~10-20 min (apt + compile + appimagetool). Cap at 45
-    # so a runner stalled on network or apt hangs fails fast instead of holding
-    # the job for GitHub's 6-hour default.
     timeout-minutes: 45
     steps:
       - name: Checkout code
@@ -51,26 +48,15 @@ jobs:
           cp lucidgrasp.png AppDir/usr/share/icons/hicolor/256x256/apps/io.github.dialga_cmd.LucidGrasp.png
           cp io.github.dialga_cmd.LucidGrasp.desktop AppDir/usr/share/applications/io.github.dialga_cmd.LucidGrasp.desktop
 
-          # appimagetool does NOT look in usr/share for either of these. It
-          # globs the AppDir ROOT non-recursively for *.desktop, then looks for
-          # <Icon>.png in that same root, and exits with "Desktop file not
-          # found, aborting" otherwise. Both copies are wanted: the root ones
-          # for appimagetool, the usr/share ones for desktop integration.
           cp io.github.dialga_cmd.LucidGrasp.desktop AppDir/
           cp lucidgrasp.png AppDir/io.github.dialga_cmd.LucidGrasp.png
 
-          # Create AppRun script
           echo '#!/bin/sh' > AppDir/AppRun
           echo 'exec "$APPDIR/usr/bin/LucidGrasp" "$@"' >> AppDir/AppRun
           chmod +x AppDir/AppRun
 
       - name: Package AppImage
         run: |
-          # appimagetool is itself an AppImage, and the runner has no
-          # libfuse.so.2, so a plain run dies with "dlopen(): error loading
-          # libfuse.so.2 / AppImages require FUSE to run" before it ever looks
-          # at the AppDir. APPIMAGE_EXTRACT_AND_RUN unpacks to a temp dir and
-          # executes instead of mounting, which needs no FUSE at all.
           APPIMAGE_EXTRACT_AND_RUN=1 ./appimagetool AppDir LucidGrasp-x86_64.AppImage
 
       - name: Upload Artifact

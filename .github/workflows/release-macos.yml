@@ -1,38 +1,15 @@
 name: Build macOS Release
 
-# Kept separate from release.yml rather than added as a third job there, because
-# the packaging steps differ enough that the shared job would be mostly
-# conditionals: Homebrew instead of apt, macdeployqt instead of windeployqt, and
-# hdiutil instead of Inno Setup. A release tag produces both, which is why it is
-# release-only: release.yml's build-macos already covers every PR, so keeping
-# `pull_request` here too meant macOS was built and packaged twice per PR while
-# two jobs raced to upload a file with the same lucidgrasp-macos-*.dmg name.
-
 on:
   release:
     types: [published]
-  # Deliberately NOT pull_request. See above.
 
 permissions:
   contents: write
 
 jobs:
   build-macos:
-    # macos-15-intel, NOT macos-13. GitHub retired the macOS 13 image on
-    # 2025-12-04, and a job naming a retired label does not fail -- it queues
-    # forever waiting for a runner that will never be provisioned. macos-15-intel
-    # is the replacement GitHub added for x86_64 and runs until August 2027.
-    #
-    # Intel rather than arm64 on purpose: an x86_64 app runs on both under
-    # Rosetta on Apple Silicon, whereas an arm64-only build would not start at
-    # all on an Intel Mac. One artifact covers both, so there is no second build.
-    #
-    # Note the expiry. When it passes, migrate to macos-26-intel, and eventually
-    # to arm64 with lipo, since GitHub drops Intel entirely after the macOS 15
-    # image retires in Fall 2027.
     runs-on: macos-15-intel
-    # Healthy: ~8 min, plus hdiutil retries. Caps a hung brew/hdiutil well
-    # under GitHub's 6-hour default.
     timeout-minutes: 45
 
     steps:
@@ -43,40 +20,17 @@ jobs:
       uses: jurplel/install-qt-action@v4
       with:
         version: '6.5.*'
-        # 'mac', not 'macos'. aqt's host enum is exactly
-        # windows | windows_arm64 | mac | linux | linux_arm64 | all_os, and the
-        # action validates against it before doing anything, so 'macos' fails
-        # with a TypeError naming the accepted values rather than with anything
-        # about Qt. The OS name and the aqt host name are not the same string.
         host: 'mac'
         target: 'desktop'
-        # No arch. aqt names the macOS package directory clang_64 regardless of
-        # the build's real architecture, so 'x86_64' resolves to nothing and the
-        # install fails. Omitted on purpose: for macOS the action documents that
-        # the value is determined dynamically, which is the one thing that works.
 
     - name: Install OpenCV
       run: |
-        # opencv@4, NOT opencv@4.10. Homebrew names versioned formulae
-        # opencv@4, opencv@5 and so on, with the exact patch release tracked in
-        # the formula; there is no opencv@4.10 and brew exits non-zero on it.
-        # The unversioned `opencv` is now 5.x, whose API this code has never been
-        # built against, so the major version is pinned here instead.
-        #
-        # The patch level is deliberately not pinned: this formula is only
-        # updated in place, so pinning 4.10 would mean pinning a version that no
-        # longer exists and failing the same way.
         brew install opencv@4
 
     - name: Generate app icon
       run: |
-        # Before configure, because CMake needs to see the .icns in order to add
-        # it to the bundle's resources. Failing here names the problem; failing
-        # later inside CMake does not.
         chmod +x make-icns.sh
         ./make-icns.sh lucidgrasp.png lucidgrasp.icns
-        # Prove the plist CMake will render names the file that exists, rather
-        # than discovering the mismatch after the bundle is built.
         test -s lucidgrasp.icns
 
     - name: Build Project
@@ -88,9 +42,6 @@ jobs:
 
     - name: Self Test
       run: |
-        # An .app bundle takes the exec bit and bundle identity, but the
-        # selftest path runs the Mach-O directly, which is fine and avoids
-        # signing overhead on a throwaway run.
         QT_QPA_PLATFORM=offscreen ./build/LucidGrasp.app/Contents/MacOS/LucidGrasp --selftest
         if [ $? -ne 0 ]; then
           echo "Self-test failed"
@@ -104,10 +55,6 @@ jobs:
         MACOS_DIR="$APP/Contents/MacOS"
         FRAMEWORKS="$APP/Contents/Frameworks"
 
-        # The bundle is worthless without its icon, and CMake only warns when the
-        # .icns is absent, so this is checked rather than assumed. A release that
-        # shipped a blank-icon DMG would be indistinguishable from a working one
-        # in the CI log.
         if [ ! -s "$APP/Contents/Resources/lucidgrasp.icns" ]; then
           echo "ERROR: the bundle carries no icon."
           echo "  Contents/Resources:"
@@ -117,19 +64,6 @@ jobs:
         fi
         echo "Icon: $(wc -c <"$APP/Contents/Resources/lucidgrasp.icns" | tr -d ' ') bytes"
 
-        # macdeployqt copies Qt's frameworks and plugins into the bundle and
-        # rewrites the binary's load paths to point at them. It knows nothing
-        # about OpenCV, which is handled below.
-        #
-        # From $QT_ROOT_DIR, which install-qt-action exports, and NOT from Homebrew.
-        # The runner has a Qt of its own and `brew install qt` would give a second,
-        # different one; a macdeployqt from a different Qt than the one the binary
-        # links against produces a bundle whose frameworks do not match it. Using
-        # the same Qt that CMake configured against is the only safe pairing.
-        #
-        # Checked explicitly rather than letting the shell report "No such file":
-        # without this, a Qt that failed to install looks like a packaging bug
-        # several steps later, in the middle of the dylib rewriting.
         if [ -z "$QT_ROOT_DIR" ]; then
           echo "ERROR: QT_ROOT_DIR is unset; the Qt install step did not run"
           exit 1
@@ -139,28 +73,10 @@ jobs:
           ls "$QT_ROOT_DIR/bin" 2>/dev/null || echo "(no bin directory either)"
           exit 1
         fi
-        # -no-strip is the only option here. macdeployqt's own set is small:
-        # -help, -verbose, -no-plugins, -executable, -qmldir, -always-overwrite,
-        # -dmg, -use-debug-libs, -no-strip, -appstore-compliant, -hardened-runtime,
-        # -codesign and -sign-for-notarization. Anything else is an error
-        # rather than a warning, and this step originally passed
-        # -no-translations and -no-system-d3d-compiler, which belong to
-        # windeployqt over on the Windows runner -- harmless there, fatal here,
-        # where macdeployqt reads them as unknown arguments and refuses.
-        # Qt docs: doc.qt.io/qt-6/macos-deployment.html.
         "$QT_ROOT_DIR/bin/macdeployqt" "$APP" -no-strip
 
-        # OpenCV arrives from Homebrew and is linked by absolute path
-        # (/opt/homebrew/... on arm64, /usr/local/... on Intel). Neither path
-        # exists on a user's Mac, so the bundle has to carry its own copies.
-        # Without this the app cannot launch at all -- and it fails at launch,
-        # not at build, so nothing upstream of here would have caught it.
         mkdir -p "$FRAMEWORKS"
 
-        # otool -L lists the Mach-O's direct dependencies. @rpath-relative and
-        # /System /usr/lib entries are already relocatable and are left alone;
-        # rewriting a system path would break the code signature and stop the
-        # process starting at all.
         OT_DYLIBS=$(otool -L "$MACOS_DIR/LucidGrasp" \
           | tail -n +2 \
           | awk '{print $1}' \
@@ -176,10 +92,6 @@ jobs:
             "$MACOS_DIR/LucidGrasp"
         done
 
-        # The dylibs' own dependencies need the same treatment. OpenCV's modules
-        # reference each other by absolute Homebrew path, so copying them without
-        # rewriting their internal references produces a bundle that loads the
-        # first dylib and then dies finding its siblings.
         for dylib in "$FRAMEWORKS"/libopencv*.dylib; do
           [ -e "$dylib" ] || continue
           for dep in $(otool -L "$dylib" | tail -n +2 | awk '{print $1}' \
@@ -192,24 +104,15 @@ jobs:
           done
         done
 
-        # Give the copied dylibs an install name inside the bundle, or the loader
-        # looks for them by their original path even though the load paths now
-        # say @rpath.
         for dylib in "$FRAMEWORKS"/libopencv*.dylib; do
           [ -e "$dylib" ] || continue
           install_name_tool -id "@rpath/$(basename "$dylib")" "$dylib" \
             || true
         done
 
-        # @executable_path/../Frameworks is what resolves the copied dylibs at
-        # run time. Qt frameworks land in the same directory via macdeployqt, so
-        # one rpath covers both.
         install_name_tool -add_rpath "@executable_path/../Frameworks" \
           "$MACOS_DIR/LucidGrasp" 2>/dev/null || true
 
-        # No leftover absolute Homebrew reference anywhere in the bundle. This is
-        # the check that catches an OpenCV module added after the copy loop ran,
-        # which is otherwise the single most likely way this bundle ships broken.
         if otool -L "$MACOS_DIR/LucidGrasp" "$FRAMEWORKS"/*.dylib 2>/dev/null \
            | grep -qE '^/opt/homebrew|^/usr/local'; then
           echo "ERROR: absolute Homebrew paths remain in the bundle:"
@@ -219,9 +122,6 @@ jobs:
         fi
         echo "No absolute Homebrew paths remain."
 
-        # An app bundle is launched by path, not by cwd, but a lot of code still
-        # writes next to the working directory. macdeployqt already sets this;
-        # restated so the intent is visible rather than inherited by luck.
         codesign --force --deep --sign - "$APP"
 
     - name: Create DMG
@@ -232,18 +132,10 @@ jobs:
         rm -rf "$STAGE"
         mkdir -p "$STAGE"
 
-        # At the root of the image, not in a subfolder: a folder inside the DMG
-        # is a reliable way to make the drag-to-Applications gesture feel broken,
-        # because the app is not where the user expects to drop it.
         cp -R "$APP" "$STAGE/"
 
-        # The symlink that makes the window's arrow bar work.
         ln -s /Applications "$STAGE/Applications"
 
-        # Read from CMakeCache.txt rather than a literal: the version is already
-        # in project(... VERSION ...) and already compiled into the binary and the
-        # Info.plist, so this makes the artifact name agree with all three
-        # instead of depending on someone remembering to bump a fourth copy.
         VERSION=$(grep '^CMAKE_PROJECT_VERSION:STATIC=' build/CMakeCache.txt \
           | cut -d= -f2)
         if [ -z "$VERSION" ]; then
@@ -255,14 +147,6 @@ jobs:
 
         DMG="lucidgrasp-macos-${VERSION}.dmg"
 
-        # Compressed UDZO and a fixed size: hdiutil's default is a sparse image
-        # whose apparent capacity is the whole disk, which downloads as a
-        # multi-gigabyte file.
-        #
-        # Retried because hdiutil create fails intermittently on GitHub's macOS
-        # runners with "Resource busy" (actions/runner-images#7522), and this
-        # step only ever runs on release day -- exactly where a runner flake
-        # must not be able to sink the release.
         for attempt in 1 2 3 4 5; do
           if hdiutil create \
             -volname "LucidGrasp ${VERSION}" \
@@ -282,8 +166,6 @@ jobs:
           sleep 10
         done
 
-        # A DMG that hdiutil reports success on can still be unattachable, and
-        # that is only visible by attaching it, so it is actually attached.
         hdiutil attach "$DMG" -nobrowse -mountpoint /tmp/lucidgrasp-verify
         if [ ! -d /tmp/lucidgrasp-verify/LucidGrasp.app ]; then
           echo "ERROR: the app is not at the root of the mounted image"
@@ -291,8 +173,6 @@ jobs:
           hdiutil detach /tmp/lucidgrasp-verify || true
           exit 1
         fi
-        # LaunchServices must be able to read the plist out of the mounted image,
-        # or Finder shows a blank icon and refuses to open it.
         plutil -lint /tmp/lucidgrasp-verify/LucidGrasp.app/Contents/Info.plist
         hdiutil detach /tmp/lucidgrasp-verify
 

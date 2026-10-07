@@ -13,8 +13,6 @@
 #include <QTimer>
 #include <QUrl>
 
-// Both come from CMake, so there is one place to bump a release. The fallbacks
-// only matter for a translation unit built outside the project's build system.
 #ifndef LUCIDGRASP_VERSION
 #define LUCIDGRASP_VERSION "0.0.0"
 #endif
@@ -24,26 +22,14 @@
 
 namespace {
 
-// Long enough for a slow link, short enough that a black-holed connection does
-// not leave the checker busy. The failure is silent, so the cost of being
-// generous is one wasted second, and the cost of being stingy is a missed
-// update notice.
 constexpr int kTimeoutMs = 10000;
 
 struct ParsedVersion {
     bool valid = false;
     qint64 part[3] = {0, 0, 0};
-    QString pre;  // prerelease label, without the leading '-'
+    QString pre;
 };
 
-// Semantic version, with two strictnesses on top of a plain numeric split.
-//
-//  - A leading zero in any component is rejected. This is a real semver rule,
-//    and it is the rule that saves us from a date-based tag: "v2024.01.15"
-//    parses numerically as version 2024.1.15, which would outrank 1.1.0 and
-//    tell every user to update, on every launch, forever.
-//  - A component that will not fit in a qint64 is rejected rather than
-//    wrapping, so a long numeric tag cannot come out as a small one.
 ParsedVersion parseVersion(const QString& raw)
 {
     ParsedVersion out;
@@ -58,7 +44,6 @@ ParsedVersion parseVersion(const QString& raw)
         out.pre = core.mid(dash + 1);
         core = core.left(dash);
     }
-    // Build metadata is explicitly not part of precedence, so it is dropped.
     const int plus = core.indexOf(QLatin1Char('+'));
     if (plus >= 0)
         core = core.left(plus);
@@ -72,7 +57,7 @@ ParsedVersion parseVersion(const QString& raw)
         if (p.isEmpty())
             return out;
         if (p.size() > 1 && p.startsWith(QLatin1Char('0')))
-            return out;  // leading zero
+            return out;
         for (const QChar& ch : p) {
             if (!ch.isDigit())
                 return out;
@@ -87,7 +72,7 @@ ParsedVersion parseVersion(const QString& raw)
     return out;
 }
 
-}  // namespace
+}
 
 namespace app {
 
@@ -104,8 +89,6 @@ bool isNewerVersion(const QString& candidateTag, const QString& currentVersion)
     const ParsedVersion a = parseVersion(candidateTag);
     const ParsedVersion b = parseVersion(currentVersion);
 
-    // Either side unreadable means we do not know which is newer, and the only
-    // safe answer is to claim nothing.
     if (!a.valid || !b.valid)
         return false;
 
@@ -114,10 +97,6 @@ bool isNewerVersion(const QString& candidateTag, const QString& currentVersion)
             return a.part[i] > b.part[i];
     }
 
-    // Identical numbers. A release outranks its own prereleases, so the side
-    // without a prerelease label is the newer one. Two prereleases of the same
-    // version (rc1 against rc2) are left alone: ordering those needs the full
-    // semver identifier comparison, and guessing would only ever nag.
     if (a.pre.isEmpty() != b.pre.isEmpty())
         return a.pre.isEmpty();
 
@@ -133,9 +112,6 @@ bool parseLatestRelease(const QByteArray& json, ReleaseInfo* out)
 
     const QJsonObject o = doc.object();
 
-    // /releases/latest already excludes drafts and prereleases, but the endpoint
-    // is not the only thing feeding this parser -- the self-test is -- and a
-    // defensive check here costs nothing against a very bad failure mode.
     if (o.value(QLatin1String("draft")).toBool(false))
         return false;
     if (o.value(QLatin1String("prerelease")).toBool(false))
@@ -146,8 +122,6 @@ bool parseLatestRelease(const QByteArray& json, ReleaseInfo* out)
         return false;
 
     const QString url = o.value(QLatin1String("html_url")).toString().trimmed();
-    // Without a page to send the user to there is nothing actionable to show,
-    // so this is treated as no release rather than as a broken dialog.
     if (url.isEmpty())
         return false;
 
@@ -160,8 +134,6 @@ bool parseLatestRelease(const QByteArray& json, ReleaseInfo* out)
     }
     return true;
 }
-
-// --- UpdateSettings --------------------------------------------------------
 
 UpdateSettings::UpdateSettings()
     : store_(QSettings::IniFormat,
@@ -209,13 +181,11 @@ bool UpdateSettings::shouldCheckNow(int intervalHours) const
 
     const QDateTime last = lastCheck();
     if (!last.isValid())
-        return true;  // never checked
+        return true;
 
     return QDateTime::currentDateTimeUtc()
         >= last.addSecs(qint64(intervalHours) * 3600);
 }
-
-// --- UpdateChecker ---------------------------------------------------------
 
 UpdateChecker::UpdateChecker(QObject* parent)
     : QObject(parent)
@@ -264,34 +234,27 @@ void UpdateChecker::setDisabled(bool disabled)
 void UpdateChecker::run()
 {
     if (checking_)
-        return;  // a manual click during an automatic check is not an error
+        return;
     checking_ = true;
 
     const QUrl url(QStringLiteral("https://api.github.com/repos/" LUCIDGRASP_REPO
                                   "/releases/latest"));
 
     QNetworkRequest request(url);
-    // GitHub rejects requests without a User-Agent outright, so this is not
-    // optional polish.
     request.setHeader(QNetworkRequest::UserAgentHeader,
                       QStringLiteral("LucidGrasp/" LUCIDGRASP_VERSION));
     request.setRawHeader("Accept", "application/vnd.github+json");
     request.setRawHeader("X-GitHub-Api-Version", "2022-11-28");
 
-    // Follow a renamed repository, but never a redirect that drops off https.
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
                          QNetworkRequest::NoLessSafeRedirectPolicy);
 
-    // Covers the common stall. The timer below covers the rest, because
-    // "still running forever" must never leave the checker permanently busy.
     request.setTransferTimeout(kTimeoutMs);
 
     QNetworkReply* reply = net_->get(request);
     connect(reply, &QNetworkReply::finished, this,
             [this, reply] { handleReply(reply); });
 
-    // QPointer, not a bare pointer: a reply that finished first is deleted, and
-    // touching it afterwards would be undefined behaviour rather than a no-op.
     const QPointer<QNetworkReply> guard(reply);
     QTimer::singleShot(kTimeoutMs + 2000, this, [guard] {
         if (guard && guard->isRunning())
@@ -303,13 +266,6 @@ void UpdateChecker::handleReply(QNetworkReply* reply)
 {
     reply->deleteLater();
 
-    // The attempt is recorded whatever happened. That is the anti-hammering
-    // mechanism, not a detail: unauthenticated GitHub allows 60 requests per
-    // hour per IP address, and an IP is shared by everyone behind one NAT or
-    // carrier-grade NAT. Recording failures too means an office that has
-    // exhausted the shared budget retries once a day rather than once per
-    // launch. It also makes a failure indistinguishable from a check that never
-    // happened, which is exactly what we want to show the user: nothing.
     settings_.setLastCheck(QDateTime::currentDateTimeUtc());
 
     if (reply->error() != QNetworkReply::NoError) {
@@ -338,12 +294,8 @@ void UpdateChecker::handleReply(QNetworkReply* reply)
     }
 
     checking_ = false;
-    // Notification first, outcome second. `finished` has to mean "the check is
-    // over and everything that came of it has happened" -- emitted the other way
-    // round, a slot connected to it would see an available update that has not
-    // been shown to anyone yet.
     emit updateAvailable(info.tag, info.url, info.notes);
     emit finished(CheckOutcome::UpdateAvailable);
 }
 
-}  // namespace app
+}

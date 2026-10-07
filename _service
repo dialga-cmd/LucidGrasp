@@ -1,7 +1,4 @@
 <services>
-  <!-- OBS source service: fetch the live repo so rpm and deb builds see the
-       current install manifest (reverse-DNS desktop/icon/metainfo files).
-       Leaves the v1.2.3 tag alone since it predates the file renames. -->
   <service name="tar_scm" mode="buildtime">
     <param name="scm">git</param>
     <param name="url">https://github.com/dialga-cmd/LucidGrasp.git</param>

@@ -1,7 +1,5 @@
 name: lucidgrasp
 base: core24
-# The version is read from CMakeLists.txt (project(... VERSION ...)) so a
-# release only ever has to bump one place. See override-pull below.
 adopt-info: lucidgrasp
 icon: snap/gui/lucidgrasp.png
 license: MIT
@@ -20,20 +18,11 @@ confinement: strict
 platforms:
   amd64:
 
-# The `gnome` extension provides the desktop launch wrapper, GTK theming,
-# portals and the Mesa/GL stack on core24. Qt itself is staged explicitly
-# below (the Qt libraries plus the QPA platform plugins).
 apps:
   lucidgrasp:
     command: usr/bin/LucidGrasp
     extensions: [ gnome ]
     environment:
-      # Qt's QLibraryInfo::PluginsPath is the compiled-in absolute
-      # /usr/lib/<triplet>/qt6/plugins, which does not exist inside the snap
-      # namespace (the base snap ships no Qt). Whatever the launch chain does to
-      # find platforms/, imageformats/ never gets searched without this, so
-      # QImage silently loses JPEG/WebP/TIFF reading and writing -- indexing
-      # then drops every JPEG in the library. Point Qt at the staged tree.
       QT_PLUGIN_PATH: $SNAP/usr/lib/x86_64-linux-gnu/qt6/plugins
     desktop: usr/share/applications/io.github.dialga_cmd.LucidGrasp.desktop
     plugs:
@@ -47,8 +36,6 @@ apps:
 parts:
   lucidgrasp:
     plugin: cmake
-    # Built from the checked-out release tag by CI, so the snap always matches
-    # the source that was released.
     source: .
     build-packages:
       - g++
@@ -56,10 +43,6 @@ parts:
       - pkg-config
       - qt6-base-dev
       - libopencv-dev
-    # Runtime libraries pulled from the core24 (Ubuntu 24.04) archive so the
-    # snap is self-contained. Note the t64 suffix and the .so.406 OpenCV soname.
-    # qt6-qpa-plugins is what actually lets a Qt6 GUI start (libqxcb.so and the
-    # Wayland plugin); imgcodecs is what imread() needs.
     stage-packages:
       - libqt6core6t64
       - libqt6gui6t64
@@ -68,25 +51,13 @@ parts:
       - libqt6dbus6t64
       - libqt6opengl6t64
       - qt6-qpa-plugins
-      # Extra image codecs (TIFF, WebP, MNG, TGA, ICNS, WBMP). JPEG, GIF and
-      # ICO ship inside libqt6gui6t64 itself, so those need no extra package.
       - qt6-image-formats-plugins
       - libopencv-core406
       - libopencv-imgproc406
       - libopencv-imgcodecs406
       - libopencv-features2d406
-      # OpenCV on Ubuntu links against LAPACK/BLAS, which are not pulled in
-      # transitively by the opencv stage-packages. Without these the binary
-      # fails to start with "liblapack.so.3: cannot open shared object file".
       - liblapack3
       - libblas3
-    # Debian ships BLAS/LAPACK under versioned subdirs and exposes them in the
-    # main lib dir via update-alternatives symlinks that only exist after the
-    # package's postinst runs. Snapcraft never runs postinst, so the loader
-    # (which does search usr/lib/<triplet>) finds only usr/lib/<triplet>/{blas,lapack}.
-    # Relocate those files one level up instead of overriding LD_LIBRARY_PATH,
-    # which would clobber what the gnome extension sets.
-    # See https://forum.snapcraft.io/t/snapcraft-succeeds-but-libblas-so-3-link-cant-be-found-at-runtime/24840
     organize:
       usr/lib/x86_64-linux-gnu/blas/*: usr/lib/x86_64-linux-gnu/
       usr/lib/x86_64-linux-gnu/lapack/*: usr/lib/x86_64-linux-gnu/
