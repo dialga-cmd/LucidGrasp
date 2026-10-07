@@ -35,6 +35,7 @@
 #include <QSet>
 #include <QShowEvent>
 #include <QSpinBox>
+#include <QKeyEvent>
 #include <QStatusBar>
 // QGuiApplication forward-declares QStyleHints, so styleHints()->anything()
 // is a call on an incomplete type unless this is included. The class has
