@@ -19,6 +19,9 @@ permissions:
 jobs:
   build-linux:
     runs-on: ubuntu-latest
+    # Healthy: build + self-test + tarball + AppImage ≈ 10-20 min. Anything
+    # past an hour is a wedged runner, not a slow build.
+    timeout-minutes: 60
 
     steps:
     - name: Checkout code
@@ -111,6 +114,9 @@ jobs:
 
   build-windows:
     runs-on: windows-latest
+    # Healthy: ~4 min. windeployqt/Inno Setup/choco hangs shouldn't hold the
+    # job for GitHub's 6-hour default.
+    timeout-minutes: 45
 
     steps:
     - name: Checkout code
@@ -229,6 +235,9 @@ jobs:
 
   build-macos:
     runs-on: macos-15-intel
+    # Healthy: ~8 min, and this job already retries hdiutil "Resource busy".
+    # A hung hdiutil or brew shouldn't run for 6 hours.
+    timeout-minutes: 45
 
     steps:
     - name: Checkout code

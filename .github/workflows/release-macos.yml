@@ -31,6 +31,9 @@ jobs:
     # to arm64 with lipo, since GitHub drops Intel entirely after the macOS 15
     # image retires in Fall 2027.
     runs-on: macos-15-intel
+    # Healthy: ~8 min, plus hdiutil retries. Caps a hung brew/hdiutil well
+    # under GitHub's 6-hour default.
+    timeout-minutes: 45
 
     steps:
     - name: Checkout code

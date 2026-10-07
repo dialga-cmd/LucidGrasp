@@ -29,6 +29,10 @@ jobs:
   launchpad:
     name: Launchpad PPA
     runs-on: ubuntu-latest
+    # Healthy: source package + signing ≈ 2-3 min. This job imports a GPG key
+    # and runs gpg commands that would otherwise hang forever on a stray
+    # passphrase prompt; 30 min bounds that failure mode.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:

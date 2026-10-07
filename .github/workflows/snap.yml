@@ -25,6 +25,12 @@ jobs:
   snap:
     name: Snap Store
     runs-on: ubuntu-latest
+    # Healthy builds take ~7 min. A runner with a degraded route to Canonical's
+    # mirrors once crawled for 51+ min (14.5 min creating the base instance,
+    # then 1-3 min PER stage-package) and was still going when it was cancelled;
+    # without this it would have sat for GitHub's 6-hour default. Fail fast so
+    # the fix is "re-run", not "wait".
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
@@ -44,6 +50,7 @@ jobs:
           unsquashfs -ll "$snap_path" 2>/dev/null | grep -c 'usr/lib/x86_64-linux-gnu'
 
       - name: Upload snap artifact
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: snap-${{ github.sha }}
