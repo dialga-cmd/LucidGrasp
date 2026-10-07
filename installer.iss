@@ -5,6 +5,11 @@ AppName=LucidGrasp
 ; Programs displays, so it cannot affect the update check -- that compares the
 ; compiled-in version against the release tag -- but it should still not lie.
 AppVersion=1.2.0
+AppPublisher=dialga-cmd
+AppPublisherURL=https://github.com/dialga-cmd
+AppSupportURL=https://github.com/dialga-cmd/LucidGrasp/issues
+AppUpdatesURL=https://github.com/dialga-cmd/LucidGrasp/releases
+AppId=LucidGrasp
 DefaultDirName={autopf}\LucidGrasp
 DefaultGroupName=LucidGrasp
 OutputBaseFilename=LucidGrasp_Setup_x64
