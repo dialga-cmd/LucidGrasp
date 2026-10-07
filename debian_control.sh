@@ -2,7 +2,7 @@
 # This script generates the control file for the .deb package.
 
 PACKAGE_NAME="lucidgrasp"
-VERSION="1.2.0"
+VERSION="1.2.3"
 MAINTAINER="dialga-cmd <adityaraj1234@duck.com>"
 DESCRIPTION="High-performance image search engine built to identify and match visual media."
 

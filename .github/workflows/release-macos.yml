@@ -68,8 +68,8 @@ jobs:
         # Before configure, because CMake needs to see the .icns in order to add
         # it to the bundle's resources. Failing here names the problem; failing
         # later inside CMake does not.
-        chmod +x scripts/make-icns.sh
-        ./scripts/make-icns.sh lucidgrasp.png lucidgrasp.icns
+        chmod +x make-icns.sh
+        ./make-icns.sh lucidgrasp.png lucidgrasp.icns
         # Prove the plist CMake will render names the file that exists, rather
         # than discovering the mismatch after the bundle is built.
         test -s lucidgrasp.icns

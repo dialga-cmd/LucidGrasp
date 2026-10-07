@@ -67,19 +67,19 @@ bool isSystemPath(const QString &path)
   if (path.isEmpty())
     return false;
 #ifdef Q_OS_WIN
-  // A drive-root system folder, e.g. "C:/Windows". The resolved path uses
-  // forward slashes; the drive letter may be either case.
+  // A drive-root system folder or descendant, e.g. "C:/Windows" or
+  // "C:/Windows/System32". The resolved path uses forward slashes; the drive
+  // letter may be either case.
   const QString cleaned = QDir::fromNativeSeparators(path);
-  const int slash = cleaned.lastIndexOf(QLatin1Char('/'));
-  if (slash < 2)
+  if (cleaned.size() < 3 || cleaned.at(1) != QLatin1Char(':') ||
+      cleaned.at(2) != QLatin1Char('/'))
     return false;
-  const QString parent = cleaned.left(slash);
-  if (parent.size() != 2 || parent.at(1) != QLatin1Char(':'))
-    return false; // parent is not a drive root
-  const QString name = cleaned.mid(slash + 1);
-  for (const QString &n : systemDirNames())
-    if (name.compare(n, Qt::CaseInsensitive) == 0)
+  const QString rest = cleaned.mid(3); // strip drive root "C:/"
+  for (const QString &n : systemDirNames()) {
+    if (rest.compare(n, Qt::CaseInsensitive) == 0 ||
+        rest.startsWith(n + QLatin1Char('/'), Qt::CaseInsensitive))
       return true;
+  }
   return false;
 #else
   for (const QString &name : systemDirNames()) {
@@ -137,17 +137,17 @@ bool collectImages(const QString &startDir, QStringList &out,
         // Lower-cased so the pre-filter matches on a case-insensitive file
         // system; the authoritative isSystemPath() call below still requires
         // the real path to be a system root, so this cannot over-match.
-        if (systemDirNames().contains(fi.fileName().toLower()) &&
-            isSystemPath(fi.canonicalFilePath())) {
+        const QString canonical = fi.canonicalFilePath();
+        const bool isLinkOrJunction = !canonical.isEmpty() && canonical != fi.absoluteFilePath();
+        if ((systemDirNames().contains(fi.fileName().toLower()) ||
+             isLinkOrJunction) &&
+            isSystemPath(canonical)) {
           continue; // kernel or device pseudo-filesystem
         }
         const QString path = fi.absoluteFilePath();
         if (fi.isSymLink()) {
-          const QString canonical = fi.canonicalFilePath();
           if (canonical.isEmpty())
             continue; // broken link
-          if (isSystemPath(canonical))
-            continue; // link into a kernel or device pseudo-filesystem
           if (visitedSymlinks.contains(canonical))
             continue; // already walked this target; breaks cycles
           visitedSymlinks.insert(canonical);
@@ -206,8 +206,8 @@ QString legacyIndexPath(const QString &rootDir) {
       .filePath(QStringLiteral(".image_search_index.bin"));
 }
 
-QStringList supportedImageExtensions() {
-  static const QStringList cached = [] {
+const QSet<QString>& supportedImageExtensionSet() {
+  static const QSet<QString> cached = [] {
     QSet<QString> exts;
     const QList<QByteArray> formats = QImageReader::supportedImageFormats();
     for (const QByteArray &f : formats)
@@ -216,7 +216,15 @@ QStringList supportedImageExtensions() {
     exts << QStringLiteral("png") << QStringLiteral("jpg")
          << QStringLiteral("jpeg") << QStringLiteral("bmp")
          << QStringLiteral("gif");
-    QStringList list(exts.cbegin(), exts.cend());
+    return exts;
+  }();
+  return cached;
+}
+
+QStringList supportedImageExtensions() {
+  static const QStringList cached = [] {
+    QStringList list(supportedImageExtensionSet().cbegin(),
+                     supportedImageExtensionSet().cend());
     list.sort();
     return list;
   }();
@@ -227,7 +235,7 @@ bool isSupportedImage(const QString &path) {
   const int dot = path.lastIndexOf(QLatin1Char('.'));
   if (dot <= 0 || dot == path.size() - 1)
     return false; // non-empty extension required
-  return supportedImageExtensions().contains(path.mid(dot + 1).toLower());
+  return supportedImageExtensionSet().contains(path.mid(dot + 1).toLower());
 }
 
 bool ImageIndex::build(const QString &rootDir, ProgressFn progress) {
@@ -526,12 +534,13 @@ bool ImageIndex::searchFile(const QString &queryPath, double threshold,
                             std::vector<SearchResult> &out,
                             SearchProgressFn progress) const {
   Features feat;
-  if (!extractFeatures(queryPath, feat))
+  QImage queryImg;
+  if (!extractFeatures(queryPath, feat, &queryImg))
     return false;
-  // Routed through loadScaled for the same reason as the candidates: it keeps
-  // the query and the index on one resolution, which is what the histogram
-  // comparison assumes, and it applies EXIF orientation to both sides.
-  out = search(feat, loadScaled(queryPath, 512), threshold, std::move(progress));
+  // Routed through loadScaled in extractFeatures, which keeps the query and the
+  // index on one resolution, and applies EXIF orientation. Reusing queryImg here
+  // avoids decoding the same file twice.
+  out = search(feat, queryImg, threshold, std::move(progress));
   return true;
 }
 

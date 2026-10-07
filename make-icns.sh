@@ -12,7 +12,7 @@
 # Kept as a script so it runs where its output is visible, exits with a real
 # status, and can be run by hand on a Mac to reproduce a CI failure.
 #
-# Usage: scripts/make-icns.sh [source.png] [output.icns]
+# Usage: ./make-icns.sh [source.png] [output.icns]
 
 set -euo pipefail
 
