@@ -437,10 +437,13 @@ MainWindow::MainWindow(QWidget *parent)
   // currentItemChanged rather than itemSelectionChanged: the first fires for a
   // programmatic currentItem() too, so the buttons cannot drift out of sync
   // with what the grid reports as current.
-  connect(results_, &QListWidget::currentItemChanged, this,
-          [this](QListWidgetItem *) { updateResultActions(); });
+connect(results_, &QListWidget::currentItemChanged, this,
+           [this](QListWidgetItem *) { updateResultActions(); });
   connect(themeToggleBtn_, &QPushButton::clicked, this,
-          &MainWindow::toggleTheme);
+           &MainWindow::toggleTheme);
+
+  // Keyboard navigation for results grid: Enter to open, Delete to trash
+  results_->installEventFilter(this);
 
   // Before the menus, which read the stored opt-out to set their checkmark.
   updates_ = new app::UpdateChecker(this);
@@ -487,7 +490,7 @@ void MainWindow::buildMenus() {
   connect(indexAction_, &QAction::triggered, this, &MainWindow::browseLibrary);
 
   queryAction_ = file->addAction(tr("Select &Query Image..."));
-  queryAction_->setShortcut(QKeySequence(QStringLiteral("Ctrl+Q")));
+  queryAction_->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+Q")));
   connect(queryAction_, &QAction::triggered, this, &MainWindow::browseQuery);
 
   file->addSeparator();
@@ -838,13 +841,15 @@ void MainWindow::browseQuery() {
 }
 
 void MainWindow::showPreview(const QString &path) {
-  const QPixmap pm(path);
-  if (pm.isNull()) {
+  QImageReader reader(path);
+  reader.setAutoTransform(true);
+  const QImage img = reader.read();
+  if (img.isNull()) {
     preview_->setText(QStringLiteral("cannot load"));
     return;
   }
-  preview_->setPixmap(pm.scaled(preview_->size(), Qt::KeepAspectRatio,
-                                Qt::SmoothTransformation));
+  preview_->setPixmap(QPixmap::fromImage(img).scaled(
+      preview_->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
 }
 
 void MainWindow::startSearch() {
@@ -979,6 +984,7 @@ void MainWindow::renderResults(const std::vector<core::SearchResult> &results) {
     // Decode straight to thumbnail size rather than loading the full
     // image, which matters when results can be very large photographs.
     QImageReader reader(r.absPath);
+    reader.setAutoTransform(true);
     const QSize native = reader.size();
     if (native.isValid() && !native.isEmpty())
       reader.setScaledSize(native.scaled(QSize(128, 128), Qt::KeepAspectRatio));
@@ -1514,6 +1520,41 @@ QToolTip {
   target->setPalette(pal);
 }
 
+void MainWindow::dragEnterEvent(QDragEnterEvent *event) {
+  if (event->mimeData()->hasUrls()) {
+    event->acceptProposedAction();
+  }
+}
+
+void MainWindow::dropEvent(QDropEvent *event) {
+  const QList<QUrl> urls = event->mimeData()->urls();
+  if (urls.isEmpty())
+    return;
+
+  // Take the first valid local file/directory
+  for (const QUrl &url : urls) {
+    if (!url.isLocalFile())
+      continue;
+    const QString path = url.toLocalFile();
+    const QFileInfo info(path);
+    if (!info.exists())
+      continue;
+
+    if (info.isDir()) {
+      // Drop a folder -> set as library
+      libEdit_->setText(path);
+      tryLoadIndex(path);
+    } else if (info.isFile() && core::isSupportedImage(path)) {
+      // Drop an image -> set as query
+      queryEdit_->setText(path);
+      showPreview(path);
+      updateActions();
+    }
+    break; // Only handle the first valid item
+  }
+  event->acceptProposedAction();
+}
+
 void MainWindow::applyTheme() {
   applyThemeTo(this);
 
@@ -1527,4 +1568,22 @@ void MainWindow::applyTheme() {
 
   updateThemeGlyph();
   updateResultIcons();
+}
+
+bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
+  if (watched == results_ && event->type() == QEvent::KeyPress) {
+    auto *keyEvent = static_cast<QKeyEvent *>(event);
+    if (keyEvent->key() == Qt::Key_Return || keyEvent->key() == Qt::Key_Enter) {
+      QListWidgetItem *item = currentResult();
+      if (item)
+        openResult(item);
+      return true;
+    }
+    if (keyEvent->key() == Qt::Key_Delete) {
+      if (currentResult())
+        trashResult();
+      return true;
+    }
+  }
+  return QMainWindow::eventFilter(watched, event);
 }

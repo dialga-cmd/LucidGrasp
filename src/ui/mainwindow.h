@@ -14,6 +14,8 @@
 
 class QAction;
 class QColor;
+class QDragEnterEvent;
+class QDropEvent;
 class QGroupBox;
 class QIcon;
 class QLabel;
@@ -34,6 +36,9 @@ public:
 
 protected:
     void showEvent(QShowEvent* event) override;
+    void dragEnterEvent(QDragEnterEvent* event) override;
+    void dropEvent(QDropEvent* event) override;
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
 private slots:
     void browseLibrary();

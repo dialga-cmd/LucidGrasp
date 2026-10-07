@@ -177,7 +177,8 @@ jobs:
         # Create a temporary folder for the choco package
         $chocoDir = "choco-pkg"
         New-Item -ItemType Directory -Path $chocoDir -Force
-        Copy-Item scripts\packaging\lucidgrasp.nuspec $chocoDir\
+        Copy-Item lucidgrasp.nuspec $chocoDir\
+        (Get-Content "$chocoDir\lucidgrasp.nuspec" -Raw) -replace '<version>[^<]*</version>', "<version>$version</version>" | Set-Content "$chocoDir\lucidgrasp.nuspec" -NoNewline
 
         # Chocolatey expects the installer in a 'tools' folder
         New-Item -ItemType Directory -Path "$chocoDir\tools" -Force
@@ -219,8 +220,8 @@ jobs:
 
     - name: Generate app icon
       run: |
-        chmod +x scripts/make-icns.sh
-        ./scripts/make-icns.sh lucidgrasp.png lucidgrasp.icns
+        chmod +x make-icns.sh
+        ./make-icns.sh lucidgrasp.png lucidgrasp.icns
         test -s lucidgrasp.icns
 
     - name: Build Project

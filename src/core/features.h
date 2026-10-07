@@ -36,7 +36,8 @@ uint64_t computePHash(const QImage& image);
 uint64_t computeDHash(const QImage& image);
 std::array<uint8_t, kHistBins> computeHist(const QImage& image);
 
-bool extractFeatures(const QString& path, Features& out);
+bool extractFeatures(const QString& path, Features& out,
+                     QImage* loadedImage = nullptr);
 
 double hammingSimilarity(uint64_t a, uint64_t b);
 double histIntersection(const std::array<uint8_t, kHistBins>& a,

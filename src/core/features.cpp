@@ -205,7 +205,7 @@ QImage loadScaled(const QString& path, int maxSide)
     return reader.read();
 }
 
-bool extractFeatures(const QString& path, Features& out)
+bool extractFeatures(const QString& path, Features& out, QImage* loadedImage)
 {
     out.fileHash = fileHash(path);
     if (out.fileHash == 0)
@@ -222,6 +222,8 @@ bool extractFeatures(const QString& path, Features& out)
     const QFileInfo info(path);
     out.size = info.size();
     out.mtimeMs = info.lastModified().toMSecsSinceEpoch();
+    if (loadedImage)
+        *loadedImage = img;
     return true;
 }
 
