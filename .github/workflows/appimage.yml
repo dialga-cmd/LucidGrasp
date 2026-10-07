@@ -47,6 +47,14 @@ jobs:
           cp lucidgrasp.png AppDir/usr/share/icons/hicolor/256x256/apps/io.github.dialga_cmd.LucidGrasp.png
           cp io.github.dialga_cmd.LucidGrasp.desktop AppDir/usr/share/applications/io.github.dialga_cmd.LucidGrasp.desktop
 
+          # appimagetool does NOT look in usr/share for either of these. It
+          # globs the AppDir ROOT non-recursively for *.desktop, then looks for
+          # <Icon>.png in that same root, and exits with "Desktop file not
+          # found, aborting" otherwise. Both copies are wanted: the root ones
+          # for appimagetool, the usr/share ones for desktop integration.
+          cp io.github.dialga_cmd.LucidGrasp.desktop AppDir/
+          cp lucidgrasp.png AppDir/io.github.dialga_cmd.LucidGrasp.png
+
           # Create AppRun script
           echo '#!/bin/sh' > AppDir/AppRun
           echo 'exec "$APPDIR/usr/bin/LucidGrasp" "$@"' >> AppDir/AppRun

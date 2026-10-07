@@ -26,6 +26,9 @@
     <requireLicenseAcceptance>false</requireLicenseAcceptance>
   </metadata>
   <files>
-    <file source="LucidGrasp_Setup_x64.exe" destination="installers" />
+    <!-- src/target, NOT source/destination: the nuspec schema declares only
+         src (required), target and exclude, so the old attribute names made
+         choco pack fail with "The 'source' attribute is not declared." -->
+    <file src="LucidGrasp_Setup_x64.exe" target="installers" />
   </files>
 </package>
