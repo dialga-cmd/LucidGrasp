@@ -3,6 +3,10 @@ name: Build and Release
 on:
   release:
     types: [published]
+  # Every PR builds on all three platforms and runs the self-test. The
+  # packaging and upload steps below are all gated on
+  # github.event_name == 'release', so nothing here can publish anything.
+  pull_request:
 
 permissions:
   contents: write

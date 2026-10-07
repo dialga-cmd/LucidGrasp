@@ -3,6 +3,10 @@ name: Publish to Snap Store
 on:
   release:
     types: [published]
+  # Build the snap and run the headless self-test inside it on every PR. The
+  # publish step below is gated on release/manual dispatch, so a PR can never
+  # reach the store.
+  pull_request:
   workflow_dispatch:
     inputs:
       publish:
