@@ -1,0 +1,6 @@
+lucidgrasp (1.2.3-1) unstable; urgency=medium
+
+  * Initial package for openSUSE Build Service and Launchpad PPA.
+  * Installs reverse-DNS desktop entry, icon, and AppStream metainfo.
+
+ -- dialga-cmd <adityaraj1234@duck.com>  Wed, 07 Oct 2026 09:00:00 +0000

@@ -1,41 +1,50 @@
-<?xml version="1.1" encoding="UTF-8"?>
-<appstream xmlns="http://www.freedesktop.org/standards/appstream/appstream.xsd" version="3.0">
-  <app id="io.github.dialga_cmd.LucidGrasp">
-    <name>LucidGrasp</name>
-    <generic>Image Search Engine</generic>
-    <summary>High-performance image search and similarity matching</summary>
-    <description>
-      LucidGrasp is a high-performance image search engine built to identify and match visual media.
-      It operates by analyzing images at the pixel level, combining structural patterns, color distributions,
-      and keypoint features to produce a precise similarity percentage.
-
-      Key features include:
-      - Color-invariant matching: Detects edited versions of images, including those with color grading or filters.
-      - Two-stage search: Uses perceptual hashing for rapid pre-filtering and OpenCV (SSIM/ORB) for precise scoring.
-      - Massive scale: Capable of indexing entire filesystems without slowing down search performance.
-      - System integration: Follows system-wide light/dark themes and accent colors.
-    </description>
-    <screenshot type="screenshot">https://raw.githubusercontent.com/dialga-cmd/LucidGrasp/main/screenshots/1.png</screenshot>
-    <screenshot type="screenshot">https://raw.githubusercontent.com/dialga-cmd/LucidGrasp/main/screenshots/2.png</screenshot>
-    <screenshot type="screenshot">https://raw.githubusercontent.com/dialga-cmd/LucidGrasp/main/screenshots/3.png</screenshot>
-    <developer>
-      <name>dialga-cmd</name>
-      <url>https://github.com/dialga-cmd</url>
-    </developer>
-    <project license="MIT">
-      <url>https://github.com/dialga-cmd/LucidGrasp</url>
-    </project>
-    <release>
-      <version>1.2.0</version>
-      <date>2026-10-06</date>
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.dialga_cmd.LucidGrasp</id>
+  <name>LucidGrasp</name>
+  <summary>Semantic and pixel-perfect image search</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <developer id="io.github.dialga_cmd">
+    <name>dialga-cmd</name>
+  </developer>
+  <description>
+    <p>LucidGrasp indexes a folder of images and lets you find them again by
+    description, by a cropped region, or by exact pixels. It runs entirely
+    locally — no upload, no account, no telemetry.</p>
+    <p>Features:</p>
+    <ul>
+      <li>Search by a typed description</li>
+      <li>Search by dragging a box over any part of an image</li>
+      <li>Reveal a result in your file manager, or send it to the system trash</li>
+      <li>Dark and light themes following the desktop preference</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">io.github.dialga_cmd.LucidGrasp.desktop</launchable>
+  <url type="homepage">https://github.com/dialga-cmd/LucidGrasp</url>
+  <url type="bugtracker">https://github.com/dialga-cmd/LucidGrasp/issues</url>
+  <url type="vcs-browser">https://github.com/dialga-cmd/LucidGrasp</url>
+  <provides>
+    <binary>LucidGrasp</binary>
+  </provides>
+  <screenshots>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/dialga-cmd/LucidGrasp/main/screenshots/1.png</image>
+      <caption>Search results for a typed query</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/dialga-cmd/LucidGrasp/main/screenshots/2.png</image>
+      <caption>Similarity comparison across the indexed library</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/dialga-cmd/LucidGrasp/main/screenshots/3.png</image>
+      <caption>Region-based search on a cropped selection</caption>
+    </screenshot>
+  </screenshots>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="1.2.3" date="2026-10-06">
+      <url type="details">https://github.com/dialga-cmd/LucidGrasp/releases/tag/v1.2.3</url>
     </release>
-    <related>
-      <url type="homepage">https://github.com/dialga-cmd/LucidGrasp</url>
-    </related>
-    <codeset>
-      <category>Graphics</category>
-      <category>Utility</category>
-    </codeset>
-    <launchable type="desktop-file">io.github.dialga_cmd.LucidGrasp.desktop</launchable>
-  </app>
-</appstream>
+  </releases>
+</component>

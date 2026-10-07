@@ -38,7 +38,7 @@ jobs:
         mkdir -p package/LucidGrasp
         cp build/LucidGrasp package/LucidGrasp/
         cp lucidgrasp.png package/LucidGrasp/
-        cp lucidgrasp.desktop package/LucidGrasp/
+        cp io.github.dialga_cmd.LucidGrasp.desktop package/LucidGrasp/
         cp README.md package/LucidGrasp/
         cp LICENSE package/LucidGrasp/
         cd package
@@ -54,7 +54,7 @@ jobs:
         mkdir -p AppDir/usr/share/applications
         cp build/LucidGrasp AppDir/usr/bin/
         cp lucidgrasp.png AppDir/usr/share/icons/hicolor/256x256/apps/io.github.dialga_cmd.LucidGrasp.png
-        cp lucidgrasp.desktop AppDir/usr/share/applications/io.github.dialga_cmd.LucidGrasp.desktop
+        cp io.github.dialga_cmd.LucidGrasp.desktop AppDir/usr/share/applications/io.github.dialga_cmd.LucidGrasp.desktop
         echo '#!/bin/sh' > AppDir/AppRun
         echo 'exec "$APPDIR/usr/bin/LucidGrasp" "$@"' >> AppDir/AppRun
         chmod +x AppDir/AppRun

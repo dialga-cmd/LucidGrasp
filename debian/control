@@ -1,0 +1,19 @@
+Source: lucidgrasp
+Section: utils
+Priority: optional
+Maintainer: dialga-cmd <adityaraj1234@duck.com>
+Build-Depends: debhelper-compat (= 13), cmake, qt6-base-dev, libopencv-dev
+Standards-Version: 4.6.2
+Homepage: https://github.com/dialga-cmd/LucidGrasp
+Rules-Requires-Root: no
+
+Package: lucidgrasp
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, hicolor-icon-theme
+Description: High-performance image search engine
+ LucidGrasp is a high-performance image search engine that matches visual
+ media by combining SSIM structural similarity, ORB keypoint matching, and
+ color histogram intersection into a single similarity percentage. It indexes
+ local folders (up to an entire filesystem) and finds visually similar images,
+ including edited versions that have been color graded, contrast adjusted, or
+ had filters applied.

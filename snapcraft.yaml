@@ -1,0 +1,62 @@
+name: lucidgrasp
+base: core24
+version: '1.2.3'
+summary: High-performance image search engine
+description: |
+  LucidGrasp is a high-performance image search engine that finds visually
+  similar images across local folders or an entire filesystem. It combines
+  SSIM structural similarity, ORB keypoint matching, and color histogram
+  intersection into a single similarity percentage, and can detect edited
+  copies that have been color graded, contrast adjusted, or filtered.
+  Indexing and searching run on background threads and stay responsive on
+  libraries of any size.
+
+grade: stable
+confinement: strict
+architectures:
+  - amd64
+
+# The `gnome` extension brings the Qt6 runtime used by the desktop file,
+# plus GTK theming and platform integration on core24.
+apps:
+  lucidgrasp:
+    command: usr/bin/LucidGrasp
+    extensions: [ gnome ]
+    desktop: usr/share/applications/io.github.dialga_cmd.LucidGrasp.desktop
+    plugs:
+      - home
+      - network
+      - desktop
+      - desktop-legacy
+      - wayland
+      - x11
+
+parts:
+  lucidgrasp:
+    plugin: cmake
+    # Build from the live repo so SCM-based builds track the release.
+    # Once a tag is created *after* this commit (the v1.2.3 tag predates the
+    # reverse-DNS renamed desktop/icon/metainfo files), switch this to
+    # `source-tag` for reproducible store builds.
+    source: https://github.com/dialga-cmd/LucidGrasp.git
+    build-packages:
+      - g++
+      - make
+      - pkg-config
+      - qt6-base-dev
+      - libopencv-dev
+    # Runtime libraries pulled from the core24 (Ubuntu 24.04) archive so the
+    # snap is self-contained. Note the t64 suffix and the .so.406 OpenCV
+    # soname that the filtered search engine drops to.
+    stage-packages:
+      - libqt6core6t64
+      - libqt6gui6t64
+      - libqt6widgets6t64
+      - libqt6network6t64
+      - libqt6dbus6t64
+      - libopencv-core406
+      - libopencv-imgproc406
+      - libopencv-features2d406
+    cmake-parameters:
+      - -DCMAKE_INSTALL_PREFIX=/usr
+      - -DCMAKE_BUILD_TYPE=Release
