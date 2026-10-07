@@ -1,308 +1,117 @@
-name: Build and Release
+name: Release
 
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Upload to Launchpad (otherwise dry-run)"
+        type: boolean
+        default: false
+      version:
+        description: "Upstream version (default: current changelog version)"
+        type: string
+        required: false
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  LP_GPG_KEY_ID: "516C7A148DFC4221CFD3B3BE43B17F39DD2E30C1"
+  LP_PPA: "ppa:realdialga/lucidgrasp"
 
 jobs:
-  build-linux:
+  launchpad:
+    name: Launchpad PPA
     runs-on: ubuntu-latest
-
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || github.ref }}
 
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y cmake qt6-base-dev libopencv-dev g++ wget ca-certificates
+      - name: Install packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            devscripts dpkg-dev fakeroot dput
 
-    - name: Build Project
-      run: |
-        mkdir build
-        cd build
-        cmake ..
-        make -j$(nproc)
-
-    - name: Self Test
-      run: |
-        cd build
-        QT_QPA_PLATFORM=offscreen ./LucidGrasp --selftest
-
-    - name: Package Release
-      if: github.event_name == 'release'
-      run: |
-        mkdir -p package/LucidGrasp
-        cp build/LucidGrasp package/LucidGrasp/
-        cp lucidgrasp.png package/LucidGrasp/
-        cp io.github.dialga_cmd.LucidGrasp.desktop package/LucidGrasp/
-        cp README.md package/LucidGrasp/
-        cp LICENSE package/LucidGrasp/
-        cd package
-        tar -czvf lucidgrasp-linux-x64.tar.gz LucidGrasp/
-
-    - name: Build AppImage
-      if: github.event_name == 'release'
-      run: |
-        wget -q -O appimagetool https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
-        chmod +x appimagetool
-        mkdir -p AppDir/usr/bin
-        mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
-        mkdir -p AppDir/usr/share/applications
-        cp build/LucidGrasp AppDir/usr/bin/
-        cp lucidgrasp.png AppDir/usr/share/icons/hicolor/256x256/apps/io.github.dialga_cmd.LucidGrasp.png
-        cp io.github.dialga_cmd.LucidGrasp.desktop AppDir/usr/share/applications/io.github.dialga_cmd.LucidGrasp.desktop
-        echo '#!/bin/sh' > AppDir/AppRun
-        echo 'exec "$APPDIR/usr/bin/LucidGrasp" "$@"' >> AppDir/AppRun
-        chmod +x AppDir/AppRun
-        ./appimagetool AppDir LucidGrasp-x86_64.AppImage
-
-    - name: Update Scoop Bucket
-      if: github.event_name == 'release'
-      run: |
-        VERSION=${{ github.event.release.tag_name }}
-        REPO=${{ github.repository }}
-        URL="https://github.com/$REPO/releases/download/$VERSION/LucidGrasp_Setup_x64.exe"
-        HASH=$(curl -sL "$URL" | sha256sum | cut -d' ' -f1)
-        cat <<EOF > lucidgrasp.json
-        {
-          "version": "$VERSION",
-          "description": "High-performance image search engine built to identify and match visual media.",
-          "homepage": "https://github.com/$REPO",
-          "url": "$URL",
-          "hash": "$HASH",
-          "moniker": "lucidgrasp"
-        }
-        EOF
-        git config --global user.name "github-actions[bot]"
-        git config --global user.email "github-actions[bot]@users.noreply.github.com"
-        git clone https://x-access-token:${{ secrets.BUCKET_TOKEN }}@github.com/dialga-cmd/lucidgrasp-bucket.git
-        cp lucidgrasp.json lucidgrasp-bucket/
-        cd lucidgrasp-bucket
-        git add lucidgrasp.json
-        git commit -m "Update LucidGrasp to $VERSION"
-        git push
-
-    - name: Upload Release Assets
-      if: github.event_name == 'release'
-      uses: softprops/action-gh-release@v2
-      with:
-        files: |
-          package/lucidgrasp-linux-x64.tar.gz
-          LucidGrasp-x86_64.AppImage
-
-  build-windows:
-    runs-on: windows-latest
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Install Qt6
-      uses: jurplel/install-qt-action@v4
-      with:
-        version: '6.5.*'
-        host: 'windows'
-        target: 'desktop'
-        arch: 'win64_msvc2019_64'
-
-    - name: Install OpenCV
-      shell: pwsh
-      run: |
-        $opencvVersion = "4.10.0"
-        $url = "https://github.com/opencv/opencv/releases/download/$opencvVersion/opencv-$opencvVersion-windows.exe"
-        Invoke-WebRequest -Uri $url -OutFile opencv-installer.exe
-        Start-Process -FilePath .\opencv-installer.exe -ArgumentList "-o`"C:\opencv`" -y" -Wait
-        echo "OpenCV_DIR=C:\opencv\opencv\build" >> $env:GITHUB_ENV
-        echo "OpenCV_BIN=C:\opencv\opencv\build\x64\vc16\bin" >> $env:GITHUB_ENV
-
-    - name: Setup MSVC
-      uses: ilammy/msvc-dev-cmd@v1
-      with:
-        toolset: '14.29'
-
-    - name: Build Project
-      shell: pwsh
-      run: |
-        mkdir build
-        cd build
-        cmake .. -G "NMake Makefiles" -DCMAKE_BUILD_TYPE=Release -DOpenCV_DIR="$env:OpenCV_DIR"
-        nmake
-
-    - name: Self Test
-      shell: pwsh
-      run: |
-        $env:QT_QPA_PLATFORM = "offscreen"
-        $env:PATH = "$env:OpenCV_BIN;$env:PATH"
-        .\build\LucidGrasp.exe --selftest
-        if ($LASTEXITCODE -ne 0) { throw "Self-test failed (exit code $LASTEXITCODE)" }
-
-    - name: Bundle Dependencies
-      if: github.event_name == 'release'
-      shell: pwsh
-      run: |
-        $dest = "package\LucidGrasp"
-        New-Item -ItemType Directory -Path $dest -Force
-        Copy-Item build\LucidGrasp.exe $dest\
-        Copy-Item lucidgrasp.png $dest\
-        Copy-Item README.md $dest\
-        Copy-Item LICENSE $dest\
-        windeployqt --release --no-translations --no-system-d3d-compiler --no-opengl-sw $dest\LucidGrasp.exe
-        Copy-Item "$env:OpenCV_BIN\opencv_world*.dll" $dest\
-
-    - name: Install Inno Setup
-      if: github.event_name == 'release'
-      shell: pwsh
-      run: |
-        choco install innosetup -y --no-progress
-
-    - name: Compile Windows Installer
-      if: github.event_name == 'release'
-      shell: pwsh
-      run: |
-        $cache = Get-Content build\CMakeCache.txt
-        $match = $cache | Select-String '^CMAKE_PROJECT_VERSION:STATIC=(.+)$'
-        if (-not $match) { throw "CMAKE_PROJECT_VERSION not found in CMakeCache.txt" }
-        $version = $match.Matches[0].Groups[1].Value
-        (Get-Content installer.iss -Raw) -replace '(?m)^AppVersion=[^\r\n]*', "AppVersion=$version" | Set-Content installer.iss -NoNewline
-        & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
-
-    - name: Create Chocolatey Package
-      if: github.event_name == 'release'
-      shell: pwsh
-      run: |
-        # Create a temporary folder for the choco package
-        $chocoDir = "choco-pkg"
-        New-Item -ItemType Directory -Path $chocoDir -Force
-        Copy-Item scripts\packaging\lucidgrasp.nuspec $chocoDir\
-
-        # Chocolatey expects the installer in a 'tools' folder
-        New-Item -ItemType Directory -Path "$chocoDir\tools" -Force
-        Copy-Item package\LucidGrasp\LucidGrasp.exe $chocoDir\tools\LucidGrasp_Setup_x64.exe
-
-        # Pack the package
-        cd $chocoDir
-        choco pack
-
-        # Move the resulting .nupkg to the main package folder
-        Move-Item *.nupkg ../package/
-        cd ..
-
-    - name: Upload Release Asset
-      if: github.event_name == 'release'
-      uses: softprops/action-gh-release@v2
-      with:
-        files: |
-          package/LucidGrasp_Setup_x64.exe
-          package/*.nupkg
-
-  build-macos:
-    runs-on: macos-15-intel
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Install Qt6
-      uses: jurplel/install-qt-action@v4
-      with:
-        version: '6.5.*'
-        host: 'mac'
-        target: 'desktop'
-
-    - name: Install OpenCV
-      run: |
-        brew install opencv@4
-
-    - name: Generate app icon
-      run: |
-        chmod +x scripts/make-icns.sh
-        ./scripts/make-icns.sh lucidgrasp.png lucidgrasp.icns
-        test -s lucidgrasp.icns
-
-    - name: Build Project
-      run: |
-        cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
-          -DOpenCV_DIR="$(brew --prefix opencv@4)/lib/cmake/opencv4" \
-          -DLUCIDGRASP_ICNS="$PWD/lucidgrasp.icns"
-        cmake --build build -j$(sysctl -n hw.ncpu)
-
-    - name: Self Test
-      run: |
-        QT_QPA_PLATFORM=offscreen ./build/LucidGrasp.app/Contents/MacOS/LucidGrasp --selftest
-        if [ $? -ne 0 ]; then
-          echo "Self-test failed"
-          exit 1
-        fi
-
-    - name: Bundle Dependencies
-      if: github.event_name == 'release'
-      run: |
-        APP=build/LucidGrasp.app
-        MACOS_DIR="$APP/Contents/MacOS"
-        FRAMEWORKS="$APP/Contents/Frameworks"
-        if [ ! -s "$APP/Contents/Resources/lucidgrasp.icns" ]; then
-          echo "ERROR: the bundle carries no icon."
-          exit 1
-        fi
-        "$QT_ROOT_DIR/bin/macdeployqt" "$APP" -no-strip
-        mkdir -p "$FRAMEWORKS"
-        OT_DYLIBS=$(otool -L "$MACOS_DIR/LucidGrasp" | tail -n +2 | awk '{print $1}' | grep -E '^/opt/homebrew|^/usr/local' || true)
-        for lib in $OT_DYLIBS; do
-          base=$(basename "$lib")
-          if [ ! -f "$FRAMEWORKS/$base" ]; then
-            cp -L "$lib" "$FRAMEWORKS/$base"
-          fi
-          install_name_tool -change "$lib" "@rpath/$base" "$MACOS_DIR/LucidGrasp"
-        done
-        for dylib in "$FRAMEWORKS"/libopencv*.dylib; do
-          [ -e "$dylib" ] || continue
-          for dep in $(otool -L "$dylib" | tail -n +2 | awk '{print $1}' | grep -E '^/opt/homebrew|^/usr/local' || true); do
-            dbase=$(basename "$dep")
-            if [ ! -f "$FRAMEWORKS/$dbase" ]; then
-              cp -L "$dep" "$FRAMEWORKS/$dbase"
+      - name: Derive version
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            ver="${{ github.event.release.tag_name }}"
+            ver="${ver#v}"
+          else
+            ver="${{ inputs.version }}"
+            if [ -z "$ver" ]; then
+              ver="$(dpkg-parsechangelog -S Version | sed 's/-[^-]*$//')"
             fi
-            install_name_tool -change "$dep" "@rpath/$dbase" "$dylib"
-          done
-        done
-        for dylib in "$FRAMEWORKS"/libopencv*.dylib; do
-          [ -e "$dylib" ] || continue
-          install_name_tool -id "@rpath/$(basename "$dylib")" "$dylib" || true
-        done
-        install_name_tool -add_rpath "@executable_path/../Frameworks" "$MACOS_DIR/LucidGrasp" 2>/dev/null || true
-        codesign --force --deep --sign - "$APP"
+          fi
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+          echo "Building upstream version $ver"
 
-    - name: Create DMG
-      if: github.event_name == 'release'
-      run: |
-        APP=build/LucidGrasp.app
-        STAGE=build/dmg
-        rm -rf "$STAGE"
-        mkdir -p "$STAGE"
-        cp -R "$APP" "$STAGE/"
-        ln -s /Applications "$STAGE/Applications"
-        VERSION=$(grep '^CMAKE_PROJECT_VERSION:STATIC=' build/CMakeCache.txt | cut -d= -f2)
-        if [ -z "$VERSION" ]; then
-          echo "ERROR: CMAKE_PROJECT_VERSION not found in CMakeCache.txt"
-          exit 1
-        fi
-        DMG="lucidgrasp-macos-${VERSION}.dmg"
-        hdiutil create -volname "LucidGrasp ${VERSION}" -srcfolder "$STAGE" -ov -format UDZO "$DMG"
-        hdiutil attach "$DMG" -nobrowse -mountpoint /tmp/lucidgrasp-verify
-        if [ ! -d /tmp/lucidgrasp-verify/LucidGrasp.app ]; then
-          echo "ERROR: the app is not at the root of the mounted image"
-          hdiutil detach /tmp/lucidgrasp-verify || true
-          exit 1
-        fi
-        plutil -lint /tmp/lucidgrasp-verify/LucidGrasp.app/Contents/Info.plist
-        hdiutil detach /tmp/lucidgrasp-verify
-        ls -lh "$DMG"
+      - name: Import signing key
+        env:
+          GPG_KEY: ${{ secrets.LAUNCHPAD_GPG_KEY }}
+        run: |
+          printf '%s\n' "$GPG_KEY" | gpg --batch --import
+          gpg --batch --list-secret-keys --keyid-format long "$LP_GPG_KEY_ID"
+          # Allow non-interactive signing: preset the passphrase in gpg-agent.
+          echo "allow-loopback-pinentry" >> "$HOME/.gnupg/gpg-agent.conf"
+          echo "allow-preset-passphrase" >> "$HOME/.gnupg/gpg-agent.conf"
+          gpgconf --kill gpg-agent
+          keygrip="$(gpg --batch --with-colons --list-secret-keys "$LP_GPG_KEY_ID" \
+            | awk -F: '$1 == "fpr" { print $10; exit }')"
+          printf '%s' "${{ secrets.LAUNCHPAD_GPG_PASSPHRASE }}" \
+            | gpg-preset-passphrase --preset "$keygrip"
 
-    - name: Upload Release Asset
-      if: github.event_name == 'release'
-      uses: softprops/action-gh-release@v2
-      with:
-        files: lucidgrasp-macos-*.dmg
+      - name: Build source package
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || github.ref_name }}
+        run: |
+          set -eu
+          work="$PWD/pkg"
+          mkdir -p "$work"
+          # Full source tree for the debian/ build.
+          git archive --format=tar --prefix="lucidgrasp-${VERSION}/" HEAD \
+            | tar -x -C "$work"
+          # Upstream orig tarball: same tree without debian/, deterministic gzip.
+          git archive --format=tar --prefix="lucidgrasp-${VERSION}/" HEAD \
+            -- . ':(exclude)debian' | gzip -9n > "$work/lucidgrasp_${VERSION}.orig.tar.gz"
+          cd "$work/lucidgrasp-${VERSION}"
+          # Ephemeral changelog entry for this release (repo changelog untouched).
+          debchange \
+            --newversion "${VERSION}-1" \
+            --distribution noble \
+            --force-distribution \
+            --urgency medium \
+            --maintainer "dialga-cmd <adityaraj1234@duck.com>" \
+            -m "Release ${RELEASE_TAG}"
+          dpkg-buildpackage -S -sa -us -uc -d
+
+      - name: Sign source package
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -eu
+          cd pkg
+          debsign -k"$LP_GPG_KEY_ID" "lucidgrasp_${VERSION}-1_source.changes"
+
+      - name: Upload to Launchpad
+        if: github.event_name == 'release' || inputs.publish == true
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -eu
+          cd pkg
+          dput "$LP_PPA" "lucidgrasp_${VERSION}-1_source.changes"
+
+      - name: Dry-run note
+        if: github.event_name == 'workflow_dispatch' && inputs.publish != true
+        run: echo "::notice::Dry-run complete: source package built and signed, not uploaded."
