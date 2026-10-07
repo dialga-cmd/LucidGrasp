@@ -30,6 +30,20 @@ jobs:
         id: build
         uses: snapcore/action-build@v1
 
+      - name: Verify the snap runs
+        run: |
+          sudo snap install --dangerous "${{ steps.build.outputs.snap }}"
+          sudo snap connect lucidgrasp:home || true
+          # Boots the whole app (indexing + matching) headless.
+          QT_QPA_PLATFORM=offscreen snap run lucidgrasp --selftest
+
+      - name: Upload snap artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: snap-${{ github.sha }}
+          path: ${{ steps.build.outputs.snap }}
+          if-no-files-found: error
+
       - name: Publish snap
         if: github.event_name == 'release' || inputs.publish == true
         uses: snapcore/action-publish@v1
