@@ -69,6 +69,16 @@ parts:
       # fails to start with "liblapack.so.3: cannot open shared object file".
       - liblapack3
       - libblas3
+    # Debian ships BLAS/LAPACK under versioned subdirs and exposes them in the
+    # main lib dir via update-alternatives symlinks that only exist after the
+    # package's postinst runs. Snapcraft never runs postinst, so the loader
+    # (which does search usr/lib/<triplet>) finds only usr/lib/<triplet>/{blas,lapack}.
+    # Relocate those files one level up instead of overriding LD_LIBRARY_PATH,
+    # which would clobber what the gnome extension sets.
+    # See https://forum.snapcraft.io/t/snapcraft-succeeds-but-libblas-so-3-link-cant-be-found-at-runtime/24840
+    organize:
+      usr/lib/x86_64-linux-gnu/blas/*: usr/lib/x86_64-linux-gnu/
+      usr/lib/x86_64-linux-gnu/lapack/*: usr/lib/x86_64-linux-gnu/
     cmake-parameters:
       - -DCMAKE_INSTALL_PREFIX=/usr
       - -DCMAKE_BUILD_TYPE=Release
