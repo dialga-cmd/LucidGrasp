@@ -1,3 +1,10 @@
+lucidgrasp (1.2.3-2) unstable; urgency=medium
+
+  * Remove debian/compat; debhelper compat level comes from Build-Depends
+    on debhelper-compat (= 13) only. Fixes FTBFS.
+
+ -- dialga-cmd <adityaraj1234@duck.com>  Wed, 07 Oct 2026 14:00:00 +0000
+
 lucidgrasp (1.2.3-1) unstable; urgency=medium
 
   * Initial package for openSUSE Build Service and Launchpad PPA.
