@@ -5,7 +5,7 @@ Release:        1
 Summary:        High-performance image search engine
 License:        MIT
 URL:            https://github.com/dialga-cmd/LucidGrasp
-Source0:        %{url}/archive/refs/tags/v%{version}.tar.gz
+Source0:        %{url}/archive/refs/heads/main.tar.gz
 
 BuildRequires:  cmake
 BuildRequires:  gcc-c++
@@ -24,9 +24,8 @@ Requires:       hicolor-icon-theme
 LucidGrasp is a high-performance image search engine built to identify and match visual media.
 
 %prep
-# SCM Sync puts us in the source root.
-# We explicitly set the build directory to avoid any path confusion.
-cd %{_builddir}
+# GitHub branch archives unpack to a directory named after the ref: LucidGrasp-main
+%setup -q -n LucidGrasp-main
 
 %build
 # Use -S . to explicitly define the source directory as the current directory
