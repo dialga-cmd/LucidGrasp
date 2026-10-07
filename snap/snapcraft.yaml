@@ -64,6 +64,11 @@ parts:
       - libopencv-imgproc406
       - libopencv-imgcodecs406
       - libopencv-features2d406
+      # OpenCV on Ubuntu links against LAPACK/BLAS, which are not pulled in
+      # transitively by the opencv stage-packages. Without these the binary
+      # fails to start with "liblapack.so.3: cannot open shared object file".
+      - liblapack3
+      - libblas3
     cmake-parameters:
       - -DCMAKE_INSTALL_PREFIX=/usr
       - -DCMAKE_BUILD_TYPE=Release

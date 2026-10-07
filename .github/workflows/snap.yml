@@ -34,6 +34,8 @@ jobs:
         run: |
           sudo snap install --dangerous "${{ steps.build.outputs.snap }}"
           sudo snap connect lucidgrasp:home || true
+          echo "--- unresolved libraries (if any) ---"
+          snap run --shell lucidgrasp -c 'ldd "$SNAP/usr/bin/LucidGrasp" | grep "not found" || echo none'
           # Boots the whole app (indexing + matching) headless.
           QT_QPA_PLATFORM=offscreen snap run lucidgrasp --selftest
 
