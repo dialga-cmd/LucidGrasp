@@ -1,6 +1,10 @@
 name: lucidgrasp
 base: core24
-version: '1.2.3'
+# The version is read from CMakeLists.txt (project(... VERSION ...)) so a
+# release only ever has to bump one place. See override-pull below.
+adopt-info: lucidgrasp
+icon: snap/gui/lucidgrasp.png
+license: MIT
 summary: High-performance image search engine
 description: |
   LucidGrasp is a high-performance image search engine that finds visually
@@ -16,8 +20,9 @@ confinement: strict
 architectures:
   - amd64
 
-# The `gnome` extension brings the Qt6 runtime used by the desktop file,
-# plus GTK theming and platform integration on core24.
+# The `gnome` extension provides the desktop launch wrapper, GTK theming,
+# portals and the Mesa/GL stack on core24. Qt itself is staged explicitly
+# below (the Qt libraries plus the QPA platform plugins).
 apps:
   lucidgrasp:
     command: usr/bin/LucidGrasp
@@ -34,11 +39,9 @@ apps:
 parts:
   lucidgrasp:
     plugin: cmake
-    # Build from the live repo so SCM-based builds track the release.
-    # Once a tag is created *after* this commit (the v1.2.3 tag predates the
-    # reverse-DNS renamed desktop/icon/metainfo files), switch this to
-    # `source-tag` for reproducible store builds.
-    source: https://github.com/dialga-cmd/LucidGrasp.git
+    # Built from the checked-out release tag by CI, so the snap always matches
+    # the source that was released.
+    source: .
     build-packages:
       - g++
       - make
@@ -46,17 +49,25 @@ parts:
       - qt6-base-dev
       - libopencv-dev
     # Runtime libraries pulled from the core24 (Ubuntu 24.04) archive so the
-    # snap is self-contained. Note the t64 suffix and the .so.406 OpenCV
-    # soname that the filtered search engine drops to.
+    # snap is self-contained. Note the t64 suffix and the .so.406 OpenCV soname.
+    # qt6-qpa-plugins is what actually lets a Qt6 GUI start (libqxcb.so and the
+    # Wayland plugin); imgcodecs is what imread() needs.
     stage-packages:
       - libqt6core6t64
       - libqt6gui6t64
       - libqt6widgets6t64
       - libqt6network6t64
       - libqt6dbus6t64
+      - libqt6opengl6t64
+      - qt6-qpa-plugins
       - libopencv-core406
       - libopencv-imgproc406
+      - libopencv-imgcodecs406
       - libopencv-features2d406
     cmake-parameters:
       - -DCMAKE_INSTALL_PREFIX=/usr
       - -DCMAKE_BUILD_TYPE=Release
+    override-pull: |
+      craftctl default
+      version="$(sed -n 's/^project(LucidGrasp VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)"
+      craftctl set version="$version"
