@@ -23,6 +23,7 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QMetaObject>
+#include <QMimeData>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPair>
