@@ -38,7 +38,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            devscripts dpkg-dev fakeroot dput
+            devscripts dpkg-dev debhelper make fakeroot dput
 
       - name: Derive version
         id: ver
