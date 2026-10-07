@@ -56,8 +56,12 @@ jobs:
           sudo snap connect lucidgrasp:home || true
           echo "--- unresolved libraries (if any) ---"
           snap run --shell lucidgrasp -c 'echo LD_LIBRARY_PATH="$LD_LIBRARY_PATH"; ldd "$SNAP/usr/bin/LucidGrasp" | grep "not found" || echo none'
+          echo "--- Qt plugin discovery inside the snap namespace ---"
+          snap run --shell lucidgrasp -c 'env | grep -i "^QT" | sort; echo "QLibraryInfo default: /usr/lib/x86_64-linux-gnu/qt6/plugins ->"; ls -d /usr/lib/x86_64-linux-gnu/qt6/plugins 2>&1; echo "staged:"; ls "$SNAP/usr/lib/x86_64-linux-gnu/qt6/plugins" 2>&1'
           # Boots the whole app (indexing + matching) headless.
           QT_QPA_PLATFORM=offscreen snap run lucidgrasp --selftest
+          echo "--- self-test corpus (left behind on purpose) ---"
+          snap run --shell lucidgrasp -c 'ls -la /tmp/lucidgrasp_selftest_*/library 2>&1'
 
       - name: Publish snap
         if: github.event_name == 'release' || inputs.publish == true

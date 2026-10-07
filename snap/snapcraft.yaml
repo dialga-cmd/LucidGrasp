@@ -27,6 +27,14 @@ apps:
   lucidgrasp:
     command: usr/bin/LucidGrasp
     extensions: [ gnome ]
+    environment:
+      # Qt's QLibraryInfo::PluginsPath is the compiled-in absolute
+      # /usr/lib/<triplet>/qt6/plugins, which does not exist inside the snap
+      # namespace (the base snap ships no Qt). Whatever the launch chain does to
+      # find platforms/, imageformats/ never gets searched without this, so
+      # QImage silently loses JPEG/WebP/TIFF reading and writing -- indexing
+      # then drops every JPEG in the library. Point Qt at the staged tree.
+      QT_PLUGIN_PATH: $SNAP/usr/lib/x86_64-linux-gnu/qt6/plugins
     desktop: usr/share/applications/io.github.dialga_cmd.LucidGrasp.desktop
     plugs:
       - home
@@ -60,9 +68,8 @@ parts:
       - libqt6dbus6t64
       - libqt6opengl6t64
       - qt6-qpa-plugins
-      # Platform plugins alone are not enough: Qt6 ships JPEG (and GIF/ICO/…)
-      # decoders as image-format *plugins*, and without them the app silently
-      # cannot read JPEGs at all.
+      # Extra image codecs (TIFF, WebP, MNG, TGA, ICNS, WBMP). JPEG, GIF and
+      # ICO ship inside libqt6gui6t64 itself, so those need no extra package.
       - qt6-image-formats-plugins
       - libopencv-core406
       - libopencv-imgproc406
