@@ -437,7 +437,7 @@ MainWindow::MainWindow(QWidget *parent)
   // currentItemChanged rather than itemSelectionChanged: the first fires for a
   // programmatic currentItem() too, so the buttons cannot drift out of sync
   // with what the grid reports as current.
-connect(results_, &QListWidget::currentItemChanged, this,
+  connect(results_, &QListWidget::currentItemChanged, this,
            [this](QListWidgetItem *) { updateResultActions(); });
   connect(themeToggleBtn_, &QPushButton::clicked, this,
            &MainWindow::toggleTheme);
