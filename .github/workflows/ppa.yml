@@ -40,7 +40,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            devscripts dpkg-dev debhelper make fakeroot dput gpg-agent
+            devscripts dpkg-dev debhelper make fakeroot dput
 
       - name: Derive version
         id: ver
@@ -62,21 +62,26 @@ jobs:
         env:
           GPG_KEY: ${{ secrets.LAUNCHPAD_GPG_KEY }}
         run: |
-          printf '%s\n' "$GPG_KEY" | gpg --batch --import
-          gpg --batch --list-secret-keys --keyid-format long "$LP_GPG_KEY_ID"
-          echo "allow-loopback-pinentry" >> "$HOME/.gnupg/gpg-agent.conf"
-          echo "allow-preset-passphrase" >> "$HOME/.gnupg/gpg-agent.conf"
-          gpgconf --kill gpg-agent
-          gpgconf --launch gpg-agent
-          keygrip="$(gpg --batch --with-colons --list-secret-keys "$LP_GPG_KEY_ID" \
-            | awk -F: '$1 == "grp" { print $10; exit }')"
-          preset="$(command -v gpg-preset-passphrase)"
-          if [ -z "$preset" ]; then
-            preset="/usr/lib/gnupg2/gpg-preset-passphrase"
-            [ -x "$preset" ] || preset="/usr/lib/gnupg/gpg-preset-passphrase"
+          set -eu
+          if [ -z "$GPG_KEY" ]; then
+            echo "LAUNCHPAD_GPG_KEY is empty"
+            exit 1
           fi
-          printf '%s' "${{ secrets.LAUNCHPAD_GPG_PASSPHRASE }}" \
-            | "$preset" --preset "$keygrip"
+          export GNUPGHOME="$RUNNER_TEMP/gnupg"
+          mkdir -p "$GNUPGHOME"
+          chmod 700 "$GNUPGHOME"
+          umask 077
+          printf '%s' "${{ secrets.LAUNCHPAD_GPG_PASSPHRASE }}" > "$GNUPGHOME/passphrase"
+          printf '%s\n' \
+            "pinentry-mode loopback" \
+            "passphrase-file $GNUPGHOME/passphrase" \
+            "batch" > "$GNUPGHOME/gpg.conf"
+          printf '%s\n' "allow-loopback-pinentry" > "$GNUPGHOME/gpg-agent.conf"
+          printf '%s\n' "$GPG_KEY" | gpg --batch --import
+          gpgconf --kill gpg-agent || true
+          gpgconf --launch gpg-agent || true
+          echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
+          printf 'ci-signing-preflight\n' | gpg --batch --clearsign > /dev/null
 
       - name: Build source package
         env:
