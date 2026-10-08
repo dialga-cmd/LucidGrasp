@@ -217,7 +217,7 @@ jobs:
         $json = $manifest | ConvertTo-Json
         $parsed = $json | ConvertFrom-Json
         if ($parsed.hash -ne $hash) { throw "Manifest hash mismatch" }
-        Write-Output "Scoop manifest OK for v$version: $hash"
+        Write-Output "Scoop manifest OK for v${version}: $hash"
 
     - name: Upload Release Asset
       if: github.event_name == 'release'
