@@ -76,6 +76,8 @@ jobs:
         env:
           VERSION: ${{ steps.ver.outputs.version }}
           RELEASE_TAG: ${{ github.event.release.tag_name || github.ref_name }}
+          DEBFULLNAME: dialga-cmd
+          DEBEMAIL: adityaraj1234@duck.com
         run: |
           set -eu
           work="$PWD/pkg"
@@ -87,10 +89,10 @@ jobs:
           cd "$work/lucidgrasp-${VERSION}"
           debchange \
             --newversion "${VERSION}-1" \
+            --force-bad-version \
             --distribution noble \
             --force-distribution \
             --urgency medium \
-            --maintainer "dialga-cmd <adityaraj1234@duck.com>" \
             -m "Release ${RELEASE_TAG}"
           dpkg-buildpackage -S -sa -us -uc -d
 
