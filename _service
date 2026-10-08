@@ -2,8 +2,8 @@
   <service name="tar_scm">
     <param name="scm">git</param>
     <param name="url">https://github.com/dialga-cmd/LucidGrasp.git</param>
-    <param name="revision">main</param>
-    <param name="version">1.2.3</param>
+    <param name="revision">v1.2.4</param>
+    <param name="version">1.2.4</param>
   </service>
   <service name="recompress">
     <param name="file">*.tar</param>
