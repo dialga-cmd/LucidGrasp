@@ -164,29 +164,6 @@ void UpdateSettings::setIgnoredVersion(const QString& tag)
                     normaliseVersion(tag));
 }
 
-QDateTime UpdateSettings::lastCheck() const
-{
-    return store_.value(QStringLiteral("updates/lastCheck")).toDateTime();
-}
-
-void UpdateSettings::setLastCheck(const QDateTime& when)
-{
-    store_.setValue(QStringLiteral("updates/lastCheck"), when);
-}
-
-bool UpdateSettings::shouldCheckNow(int intervalHours) const
-{
-    if (isDisabled())
-        return false;
-
-    const QDateTime last = lastCheck();
-    if (!last.isValid())
-        return true;
-
-    return QDateTime::currentDateTimeUtc()
-        >= last.addSecs(qint64(intervalHours) * 3600);
-}
-
 UpdateChecker::UpdateChecker(QObject* parent)
     : QObject(parent)
     , net_(new QNetworkAccessManager(this))
@@ -202,7 +179,7 @@ QString UpdateChecker::currentVersion()
 
 void UpdateChecker::checkOnStartup()
 {
-    if (settings_.shouldCheckNow())
+    if (!settings_.isDisabled())
         run();
 }
 
@@ -265,8 +242,6 @@ void UpdateChecker::run()
 void UpdateChecker::handleReply(QNetworkReply* reply)
 {
     reply->deleteLater();
-
-    settings_.setLastCheck(QDateTime::currentDateTimeUtc());
 
     if (reply->error() != QNetworkReply::NoError) {
         checking_ = false;

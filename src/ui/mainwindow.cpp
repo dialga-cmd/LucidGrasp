@@ -7,6 +7,7 @@
 #include <QColor>
 #include <QDesktopServices>
 #include <QDialog>
+#include <QDialogButtonBox>
 #include <QElapsedTimer>
 #include <QFileDialog>
 #include <QFileIconProvider>
@@ -38,8 +39,11 @@
 #include <QKeyEvent>
 #include <QStatusBar>
 #include <QStyleHints>
+#include <QTabWidget>
+#include <QTextBrowser>
 #include <QTimer>
 #include <QUrl>
+#include <QUrlQuery>
 #include <QVBoxLayout>
 #include <QVector>
 #include <algorithm>
@@ -48,6 +52,228 @@
 namespace {
 
 constexpr qreal kPi = 3.14159265358979323846;
+
+const char *kPrivacyPolicyText = R"PRIVACY(
+LucidGrasp Privacy Policy
+
+Last reviewed: October 2026
+
+LucidGrasp is designed so that your work stays on your machine. Your library,
+your searches and your settings are never collected, uploaded or sold. This
+policy states exactly what the application does with your data.
+
+DATA CONTROLLER
+The data controller is the project maintainer, reachable at
+adityaraj1234@duck.com for all privacy requests. The project is a free,
+open-source effort that processes no personal data on its own behalf.
+
+DATA THAT STAYS ON YOUR COMPUTER
+
+Indexing and matching read image files only from folders you choose. Every
+similarity comparison is computed on your own machine and no image data ever
+leaves it.
+
+The search index is cached to your own disk in your system's standard
+per-user data directory (for example ~/.local/share/LucidGrasp/indexes/ on
+Linux). You can delete the cache at any time to force a rebuild; nothing is
+uploaded anywhere.
+
+Preferences such as whether automatic update checks are enabled and which
+release version you are currently ignoring are stored in a per-user INI file
+in your system's standard configuration directory.
+
+THE ONE TIME DATA LEAVES YOUR COMPUTER
+
+Update checks. On launch, unless you have turned automatic checks off in the
+Updates menu, LucidGrasp makes a single HTTPS request to the GitHub API asking
+for the latest release announcement of this project. The request carries only
+the repository identifier and the version number already installed on your
+machine. It does not include your name, your files or your library contents.
+As with any website visit, GitHub receives your IP address and the ordinary
+HTTP headers your browser or this application sends; GitHub Inc. is based in
+the United States, and GitHub's own privacy policy applies to that one
+request. This is necessary for the legitimate interest of notifying users of
+security fixes and new releases, and it can be switched off entirely in the
+Updates menu. If a newer release exists you are shown a dialog with a link;
+nothing is downloaded or installed unless you choose to do it yourself.
+
+Help menu links. "Report an Issue", "Request a Feature", "View on GitHub" and
+"Contact the Developer" open whichever external service they name (GitHub or
+your mail application) using your normal default apps. Those services have
+their own privacy policies.
+
+WHAT LUCIDGRASP NEVER DOES
+
+No analytics, no telemetry, no crash reporting, no advertising, no cookies,
+no accounts and no background services that phone home. There is no tracking
+of any kind, and no sale or sharing of personal data: the "sale" and
+"sharing" definitions under the CCPA/CPRA and comparable US state privacy
+laws never apply, so there is nothing to opt out of.
+
+LucidGrasp does not inspect, upload or transmit your images, folders or search
+queries to anyone, and no user data is used to train any machine-learning
+model.
+
+CHILDREN
+The Software is not directed at children. Consistent with COPPA (US) and the
+child-consent age set by EU member states (13 to 16 under the GDPR),
+LucidGrasp does not knowingly collect personal information from anyone under
+13.
+
+YOUR RIGHTS
+LucidGrasp holds no personal data about you, but the rights below are honored
+to the fullest extent the law requires. Write to adityaraj1234@duck.com to
+exercise any of them: access and know, correct, delete, restrict, object,
+portability, no discrimination for exercising a right, and submission by a
+duly authorized agent. Requests are answered within the statutory deadlines
+(30 days under GDPR/UK GDPR; 45 days under CCPA/CPRA). Under GDPR Article 77
+you may also complain to your local supervisory authority.
+
+CONTACT
+
+Questions about this policy: adityaraj1234@duck.com.
+)PRIVACY";
+
+const char *kTermsText = R"TERMS(
+LucidGrasp Terms of Use
+
+Effective: October 2026
+
+These terms govern your use of the LucidGrasp application, its source code,
+and its releases. By downloading, installing, using, or redistributing the
+Software you agree to them. If you do not agree, do not install or use it.
+
+THE SOFTWARE IS FREE
+
+LucidGrasp is distributed free of charge. Nothing in it is sold, licensed for
+a fee, or offered as a subscription. Because nothing is purchased there is no
+price, no cancellation process, and no refund policy is needed or offered.
+Any copy of LucidGrasp offered for money by a third party is not authorized
+by this project.
+
+OPEN SOURCE LICENSE
+
+The source code is licensed under the MIT License (see the LICENSE file),
+which permits use, copying, modification, merging, publication,
+distribution, sublicensing, and sale of the source code subject to its
+conditions.
+
+UPDATES
+
+Unless automatic checks are turned off, the Software checks GitHub on launch
+for a newer release announcement and shows a dialog when one exists (see the
+Privacy Policy). Nothing is downloaded or installed automatically.
+
+ACCEPTABLE USE AND LIABILITY
+
+You agree to use the Software lawfully and only on systems you own or are
+authorized to access, as described in the Acceptable Use Policy. The Software
+is provided "as is" without warranty of any kind, and the authors and
+copyright holders are not liable for any damages arising from its use, as
+described in DISCLAIMER.md.
+
+THIRD-PARTY SERVICES
+
+The update check talks to the GitHub API; Help menu links use your default
+browser or mail application. Those services' own terms and policies apply to
+those interactions.
+
+INTERNATIONAL USE AND EXPORT
+
+The Software is open source and publicly available. Under the US Export
+Administration Regulations, publicly available open source software is
+generally not subject to the EAR. You remain responsible for complying with
+the laws of the country in which you use or redistribute it.
+
+GOVERNING LAW
+
+These terms are governed by the laws of the Republic of India, without regard
+to its conflict-of-law rules, and disputes are subject to the exclusive
+jurisdiction of the courts of India.
+
+CHANGES AND CONTACT
+
+These terms may be revised in this repository as the project evolves.
+Questions: adityaraj1234@duck.com.
+)TERMS";
+
+const char *kDisclaimerText = R"DISCLAIMER(
+LucidGrasp Disclaimer of Warranties and Limitation of Liability
+
+Effective: October 2026
+
+AS-IS DISCLAIMER
+THE SOFTWARE IS PROVIDED "AS IS" AND "AS AVAILABLE", WITHOUT WARRANTY OF ANY
+KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE, ACCURACY, AND
+NON-INFRINGEMENT.
+
+LucidGrasp is developed and published by an individual maintainer on a
+best-effort basis. It is not warranted that the Software will be
+uninterrupted, error-free, secure, virus-free, or that defects will be
+corrected.
+
+NO GUARANTEE OF RESULTS
+Image similarity scoring is heuristic. No particular search result, ranking,
+or accuracy percentage is guaranteed, and results are for informational use
+only. They must not be relied upon for safety-critical, medical, or
+regulatory decisions.
+
+LIMITATION OF LIABILITY
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THE AUTHORS AND COPYRIGHT
+HOLDERS SHALL NOT BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY,
+WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF,
+OR IN CONNECTION WITH THE SOFTWARE, ITS USE, OR ITS RESULTS - INCLUDING
+INDIRECT, INCIDENTAL, CONSEQUENTIAL, OR EXEMPLARY DAMAGES, LOSS OF DATA, LOSS
+OF PROFITS, OR BUSINESS INTERRUPTION.
+
+The software is free; nothing is sold; these limitations are a fundamental
+basis of its availability.
+
+NOT ADVICE
+Nothing in the Software, its documentation, or its output constitutes legal,
+medical, security, or regulatory advice, a compliance review, or a
+certification of compliance with any law or framework.
+)DISCLAIMER";
+
+const char *kAcceptableUseText = R"USE(
+LucidGrasp Acceptable Use Policy
+
+Effective: October 2026
+
+LucidGrasp indexes folders on your own machine and finds visually similar
+images. You must use it within these limits.
+
+LAWFUL USE ONLY
+Use the Software only in compliance with applicable law, including copyright
+and other intellectual property law, data protection and privacy law,
+computer misuse and unauthorized-access law, and export, import, and
+sanctions law that applies to you.
+
+AUTHORIZED SYSTEMS ONLY
+Index only files and systems you own or are authorized by the owner to
+access. Do not use the Software against systems, networks, or data you have
+no right to read.
+
+WHAT YOU MAY NOT DO
+You may not use the Software to plan, facilitate, or commit any unlawful act;
+to infringe another person's rights; to surveil, track, or profile
+individuals without lawful basis; to bypass security or access controls you
+are not authorized to use; to deliver malware; or to misrepresent the
+Software, its author, or its affiliation.
+
+REDISTRIBUTION
+The source code and binaries may be redistributed under the MIT License.
+Redistributors must keep the license text and copyright notice, mark their
+modifications clearly, and must not represent modified copies as the
+official project.
+
+ENFORCEMENT
+Report violations and vulnerabilities privately: security matters go through
+SECURITY.md (GitHub private vulnerability reporting); everything else goes to
+adityaraj1234@duck.com. This policy supplements, and does not replace, the
+Terms of Use and the Disclaimer.
+)USE";
 
 QIcon paintThemeGlyph(bool dark, const QColor &colour, int logicalSize) {
   const qreal dpr = qApp->devicePixelRatio();
@@ -413,21 +639,180 @@ void MainWindow::buildMenus() {
   quitAction->setShortcut(QKeySequence::Quit);
   connect(quitAction, &QAction::triggered, this, &QWidget::close);
 
-  QMenu *help = bar->addMenu(tr("&Help"));
+  QMenu *updatesMenu = bar->addMenu(tr("&Updates"));
 
-  QAction *checkAction = help->addAction(tr("&Check for Updates..."));
+  QAction *checkAction = updatesMenu->addAction(tr("&Check for Updates..."));
   checkAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+U")));
   connect(checkAction, &QAction::triggered, this, [this] {
     updateCheckManual_ = true;
     updates_->checkNow();
   });
 
-  autoUpdateAction_ = help->addAction(tr("Check for Updates &Automatically"));
+  autoUpdateAction_ =
+      updatesMenu->addAction(tr("Check for Updates &Automatically"));
   autoUpdateAction_->setCheckable(true);
   autoUpdateAction_->setChecked(!updates_->isDisabled());
   connect(autoUpdateAction_, &QAction::toggled, this, [this](bool on) {
     updates_->setDisabled(!on);
+    if (on) {
+      updateCheckManual_ = true;
+      updates_->checkNow();
+    }
   });
+
+  updatesMenu->addSeparator();
+  QAction *notesAction = updatesMenu->addAction(tr("Latest &Release Notes"));
+  connect(notesAction, &QAction::triggered, this, [this] {
+    openExternal(QStringLiteral("https://github.com/" LUCIDGRASP_REPO
+                                "/releases/latest"));
+  });
+
+  QMenu *help = bar->addMenu(tr("&Help"));
+
+  QAction *reportAction = help->addAction(tr("&Report an Issue..."));
+  connect(reportAction, &QAction::triggered, this, [this] {
+    openIssuePage(
+        QStringLiteral("Bug: "),
+        QStringLiteral(
+            "**What happened?**\n\n"
+            "\n\n"
+            "**What did you expect to happen instead?**\n\n"
+            "\n\n"
+            "**Steps to reproduce**\n\n"
+            "1. \n2. \n\n"
+            "**LucidGrasp version**\n%1\n\n"
+            "**Operating system**\n(e.g. Windows 11, Ubuntu 24.04, macOS 14)\n")
+            .arg(QStringLiteral(LUCIDGRASP_VERSION)));
+  });
+
+  QAction *featureAction = help->addAction(tr("&Request a Feature..."));
+  connect(featureAction, &QAction::triggered, this, [this] {
+    openIssuePage(
+        QStringLiteral("Feature request: "),
+        QStringLiteral(
+            "**What problem are you trying to solve?**\n\n"
+            "\n\n"
+            "**Describe the feature you would like**\n\n"
+            "\n\n"
+            "**Alternatives you considered**\n\n"
+            "\n\n"
+            "**Anything else?**\n(e.g. mockups, example images, links)\n"));
+  });
+
+  help->addSeparator();
+
+  QAction *contactAction = help->addAction(tr("&Contact the Developer"));
+  connect(contactAction, &QAction::triggered, this, [this] {
+    QUrl url(QStringLiteral("mailto:adityaraj1234@duck.com"));
+    QUrlQuery query;
+    query.addQueryItem(QStringLiteral("subject"), tr("LucidGrasp enquiry"));
+    url.setQuery(query);
+    QDesktopServices::openUrl(url);
+  });
+
+  QAction *repoAction = help->addAction(tr("View on &GitHub"));
+  connect(repoAction, &QAction::triggered, this, [this] {
+    openExternal(QStringLiteral("https://github.com/" LUCIDGRASP_REPO));
+  });
+
+  help->addSeparator();
+
+  QAction *privacyAction = help->addAction(tr("&Privacy Policy..."));
+  connect(privacyAction, &QAction::triggered, this,
+          &MainWindow::showPrivacyDialog);
+
+  QAction *legalAction = help->addAction(tr("Legal &Notices..."));
+  connect(legalAction, &QAction::triggered, this,
+          &MainWindow::showLegalNoticesDialog);
+
+  help->addSeparator();
+
+  QAction *aboutAction = help->addAction(tr("&About LucidGrasp"));
+  connect(aboutAction, &QAction::triggered, this,
+          &MainWindow::showAboutDialog);
+}
+
+void MainWindow::openExternal(const QString &url) {
+  if (!QDesktopServices::openUrl(QUrl(url)))
+    statusBar()->showMessage(tr("Could not open %1").arg(url), 6000);
+}
+
+void MainWindow::openIssuePage(const QString &title, const QString &body) {
+  QUrl url(QStringLiteral("https://github.com/" LUCIDGRASP_REPO
+                          "/issues/new"));
+  QUrlQuery query;
+  query.addQueryItem(QStringLiteral("title"), title);
+  query.addQueryItem(QStringLiteral("body"), body);
+  url.setQuery(query);
+  QDesktopServices::openUrl(url);
+}
+
+void MainWindow::showAboutDialog() {
+  QMessageBox::about(
+      this, tr("About LucidGrasp"),
+      tr("<b>LucidGrasp %1</b><br><br>"
+         "Local image search. Index a folder, hand it an image, and it finds "
+         "every visually similar file — all on your own machine.<br><br>"
+         "Project: %2<br>"
+         "Contact: %3<br><br>"
+         "Licensed under the MIT License.")
+          .arg(QStringLiteral(LUCIDGRASP_VERSION),
+               QStringLiteral("https://github.com/" LUCIDGRASP_REPO),
+               QStringLiteral("adityaraj1234@duck.com")));
+}
+
+void MainWindow::showPrivacyDialog() {
+  auto *dialog = new QDialog(this);
+  dialog->setWindowTitle(tr("Privacy Policy"));
+  dialog->setModal(true);
+  dialog->resize(560, 600);
+
+  auto *layout = new QVBoxLayout(dialog);
+  auto *text = new QTextBrowser(dialog);
+  text->setOpenExternalLinks(true);
+  text->setPlainText(QString::fromLatin1(kPrivacyPolicyText));
+  layout->addWidget(text);
+
+  auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok, dialog);
+  connect(buttons, &QDialogButtonBox::accepted, dialog, &QDialog::accept);
+  connect(dialog, &QDialog::finished, dialog, &QObject::deleteLater);
+  layout->addWidget(buttons);
+
+  dialog->show();
+}
+
+void MainWindow::showLegalNoticesDialog() {
+  auto *dialog = new QDialog(this);
+  dialog->setWindowTitle(tr("Legal Notices"));
+  dialog->setModal(true);
+  dialog->resize(620, 620);
+
+  auto *layout = new QVBoxLayout(dialog);
+  auto *tabs = new QTabWidget(dialog);
+
+  auto *terms = new QTextBrowser(dialog);
+  terms->setOpenExternalLinks(true);
+  terms->setPlainText(QString::fromLatin1(kTermsText));
+  tabs->addTab(terms, tr("Terms of Use"));
+
+  auto *disclaimer = new QTextBrowser(dialog);
+  disclaimer->setOpenExternalLinks(true);
+  disclaimer->setPlainText(QString::fromLatin1(kDisclaimerText));
+  tabs->addTab(disclaimer, tr("Warranty & Liability"));
+
+  auto *acceptableUse = new QTextBrowser(dialog);
+  acceptableUse->setOpenExternalLinks(true);
+  acceptableUse->setPlainText(QString::fromLatin1(kAcceptableUseText));
+  tabs->addTab(acceptableUse, tr("Acceptable Use"));
+
+  layout->addWidget(tabs);
+
+  auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok, dialog);
+  connect(buttons, &QDialogButtonBox::accepted, dialog, &QDialog::accept);
+  connect(dialog, &QDialog::finished, dialog, &QObject::deleteLater);
+  layout->addWidget(buttons);
+
+  dialog->show();
 }
 
 void MainWindow::showUpdateDialog(const QString &tag, const QString &url,

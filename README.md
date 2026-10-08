@@ -25,7 +25,9 @@ Both indexing and searching run on background threads, so the window stays respo
 
 The window takes its colours from the operating system. Every surface, accent, border and text colour is read out of the desktop palette rather than chosen by hand, so LucidGrasp follows the system light or dark scheme along with your accent colour. A square button in the top right switches between the two.
 
-On launch the application checks GitHub for a newer release and tells you if there is one. It does this at most once a day, and never silently: you can turn it off permanently, or ask for it on demand, from the Help menu. It only reads the release page — nothing is ever downloaded or installed without you asking.
+Every time the application is opened it checks GitHub for a newer release and shows a dialog when one is available, unless automatic checks are turned off. 'Check for Updates...' and 'Check for Updates Automatically' live in the Updates menu, and turning the automatic option back on runs a check right away. The checker only reads the release page — nothing is ever downloaded or installed without you asking.
+
+The Help menu gets you in touch with the project: 'Report an Issue' and 'Request a Feature' open a pre-filled New Issue form on GitHub, 'Contact the Developer' opens your mail application, 'Privacy Policy...' explains exactly what the application does with your data, and 'About LucidGrasp' shows the installed version. The complete policy is also documented in [PRIVACY.md](PRIVACY.md).
 
 ### How It Works
 
@@ -147,3 +149,21 @@ To uninstall the application, run this command from the `build` directory:
 ```bash
 sudo xargs rm < install_manifest.txt
 ```
+
+### Documentation
+
+**Legal**
+
+- [Legal Notices](LEGAL.md) — index of every legal document in the project.
+- [Terms of Use](TERMS.md) — the rules for using the Software.
+- [Privacy Policy](PRIVACY.md) — what LucidGrasp does and does not send anywhere.
+- [Warranty Disclaimer](DISCLAIMER.md) — the "as is" guarantee and the limits of liability.
+- [Acceptable Use](ACCEPTABLE_USE.md) — lawful and authorized use.
+- [License](LICENSE) — the MIT License.
+
+**Project**
+
+- [Contributing Guide](CONTRIBUTING.md) — building, testing, and code conventions.
+- [Security Policy](SECURITY.md) — how to report a vulnerability.
+- [Support](SUPPORT.md) — where to get help.
+- [Changelog](CHANGELOG.md) — release history.

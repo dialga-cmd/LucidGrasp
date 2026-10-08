@@ -8,7 +8,6 @@
 #include <vector>
 
 #include <QColor>
-#include <QDateTime>
 #include <QCoreApplication>
 #include <QDir>
 #include <QElapsedTimer>
@@ -502,19 +501,11 @@ int runSelfTest()
 
         app::UpdateSettings s;
         require(!s.isDisabled(), "checks should be on by default");
-        require(s.shouldCheckNow(), "a never-checked install should check");
 
         s.setDisabled(true);
         require(s.isDisabled(), "opt-out did not persist");
-        require(!s.shouldCheckNow(), "opt-out did not stop the check");
         s.setDisabled(false);
-
-        s.setLastCheck(QDateTime::currentDateTimeUtc());
-        require(!s.shouldCheckNow(), "throttle did not engage");
-        s.setLastCheck(QDateTime::currentDateTimeUtc().addSecs(-25 * 3600));
-        require(s.shouldCheckNow(), "throttle did not expire after 25 hours");
-        s.setLastCheck(QDateTime());
-        require(s.shouldCheckNow(), "clearing the timestamp did not re-enable");
+        require(!s.isDisabled(), "re-enabling did not persist");
 
         s.setIgnoredVersion(QStringLiteral("v1.2.0"));
         require(s.ignoredVersion() == QStringLiteral("1.2.0"),
@@ -527,7 +518,7 @@ int runSelfTest()
             std::printf("FAIL: %d preference check(s) wrong\n\n", caseFailures);
             ++failures;
         } else {
-            std::printf("PASS: opt-out, mute and throttle all hold\n\n");
+            std::printf("PASS: opt-out and mute hold\n\n");
         }
     }
 

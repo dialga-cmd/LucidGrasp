@@ -1,6 +1,5 @@
 #pragma once
 
-#include <QDateTime>
 #include <QObject>
 #include <QSettings>
 #include <QString>
@@ -39,11 +38,6 @@ public:
 
     QString ignoredVersion() const;
     void setIgnoredVersion(const QString& tag);
-
-    QDateTime lastCheck() const;
-    void setLastCheck(const QDateTime& when);
-
-    bool shouldCheckNow(int intervalHours = 24) const;
 
 private:
     QSettings store_;

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(LucidGrasp VERSION 1.2.4 LANGUAGES CXX)
+project(LucidGrasp VERSION 1.2.5 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -91,5 +91,7 @@ if(UNIX AND NOT APPLE)
     install(FILES io.github.dialga_cmd.LucidGrasp.desktop DESTINATION share/applications)
     install(FILES io.github.dialga_cmd.LucidGrasp.metainfo.xml DESTINATION share/metainfo)
     install(FILES lucidgrasp.png DESTINATION share/icons/hicolor/256x256/apps RENAME io.github.dialga_cmd.LucidGrasp.png)
-    install(FILES LICENSE README.md DESTINATION share/doc/lucidgrasp)
+    install(FILES LICENSE README.md PRIVACY.md TERMS.md DISCLAIMER.md
+            ACCEPTABLE_USE.md LEGAL.md CHANGELOG.md
+            DESTINATION share/doc/lucidgrasp)
 endif()

@@ -81,6 +81,11 @@ private:
     void buildMenus();
     void showUpdateDialog(const QString &tag, const QString &url,
                           const QString &notes);
+    void showAboutDialog();
+    void showPrivacyDialog();
+    void showLegalNoticesDialog();
+    void openExternal(const QString& url);
+    void openIssuePage(const QString& title, const QString& body);
     void equalizePanelHeights();
 
     QGroupBox* libGroup_ = nullptr;
