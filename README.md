@@ -3,6 +3,10 @@
 <p align="center">
   <a href="https://github.com/dialga-cmd/LucidGrasp/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/dialga-cmd/LucidGrasp/total"></a>
   <a href="https://github.com/dialga-cmd/LucidGrasp/releases"><img alt="GitHub Releases" src="https://img.shields.io/github/v/release/dialga-cmd/LucidGrasp"></a>
+  <a href="https://github.com/dialga-cmd/LucidGrasp/releases/latest/download/lucidgrasp-linux-x64.tar.gz"><img alt="Available on Linux" src="https://img.shields.io/badge/Linux-available-brightgreen"></a>
+  <a href="https://github.com/dialga-cmd/LucidGrasp/releases/latest/download/LucidGrasp_Setup_x64.exe"><img alt="Available on Windows" src="https://img.shields.io/badge/Windows-available-brightgreen"></a>
+  <a href="https://github.com/dialga-cmd/LucidGrasp/releases"><img alt="Available on macOS" src="https://img.shields.io/badge/macOS-available-brightgreen"></a>
+  <a href="https://github.com/dialga-cmd/LucidGrasp/releases"><img alt="AppImage" src="https://img.shields.io/badge/AppImage-available-brightgreen"></a>
   <a href="https://build.opensuse.org/package/show/home:dialga-cmd/lucidgrasp"><img alt="Published on OBS" src="https://img.shields.io/badge/OBS-published-brightgreen"></a>
   <a href="https://launchpad.net/~realdialga/+archive/ubuntu/lucidgrasp"><img alt="Published on Launchpad PPA" src="https://img.shields.io/badge/Launchpad%20PPA-published-brightgreen"></a>
   <a href="https://snapcraft.io/lucidgrasp"><img alt="Published on Snap Store" src="https://img.shields.io/badge/Snap%20Store-published-brightgreen"></a>
