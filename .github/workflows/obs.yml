@@ -57,6 +57,7 @@ jobs:
           git archive --format=tar --prefix="LucidGrasp-$sv/" HEAD | gzip -c > "$top/SOURCES/LucidGrasp-$sv.tar.gz"
           cp lucidgrasp.spec "$top/SPECS/"
           rpmbuild -bb \
+            --nodeps \
             --define "_topdir $top" \
             --define "_build_id_links none" \
             "$top/SPECS/lucidgrasp.spec"
