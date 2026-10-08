@@ -67,6 +67,7 @@ jobs:
           echo "allow-loopback-pinentry" >> "$HOME/.gnupg/gpg-agent.conf"
           echo "allow-preset-passphrase" >> "$HOME/.gnupg/gpg-agent.conf"
           gpgconf --kill gpg-agent
+          gpgconf --launch gpg-agent
           keygrip="$(gpg --batch --with-colons --list-secret-keys "$LP_GPG_KEY_ID" \
             | awk -F: '$1 == "grp" { print $10; exit }')"
           preset="$(command -v gpg-preset-passphrase)"

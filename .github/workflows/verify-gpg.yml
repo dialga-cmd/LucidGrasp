@@ -42,6 +42,7 @@ jobs:
           echo "allow-loopback-pinentry" >> "$HOME/.gnupg/gpg-agent.conf"
           echo "allow-preset-passphrase" >> "$HOME/.gnupg/gpg-agent.conf"
           gpgconf --kill gpg-agent
+          gpgconf --launch gpg-agent
           keygrip="$(gpg --batch --with-colons --list-secret-keys 516C7A148DFC4221CFD3B3BE43B17F39DD2E30C1 | awk -F: '$1 == "grp" { print $10; exit }')"
           preset="$(command -v gpg-preset-passphrase)"
           if [ -z "$preset" ]; then
