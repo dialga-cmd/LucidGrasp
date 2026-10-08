@@ -50,11 +50,11 @@ jobs:
             [ -x "$preset" ] || preset="/usr/lib/gnupg/gpg-preset-passphrase"
           fi
           printf '%s\n' "$GPG_PASSPHRASE" | "$preset" --preset "$keygrip" > /tmp/preset.out 2> /tmp/preset.err
-rc=$?
-sed 's/^/PRESET_ERR: /' /tmp/preset.err
-echo "PRESET_RC=$rc"
-gpgconf --list-dirs 2>/dev/null | grep -E 'gpg|agent' | sed 's/^/DIR: /'
-exit "$rc"
+          rc=$?
+          sed 's/^/PRESET_ERR: /' /tmp/preset.err
+          echo "PRESET_RC=$rc"
+          gpgconf --list-dirs 2>/dev/null | grep -E 'gpg|agent' | sed 's/^/DIR: /'
+          exit "$rc"
 
       - name: Sign test file
         run: |
