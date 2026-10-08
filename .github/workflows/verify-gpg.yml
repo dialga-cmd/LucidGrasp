@@ -1,0 +1,50 @@
+name: Verify Launchpad GPG passphrase
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: GPG unlock check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Import signing key
+        env:
+          GPG_KEY: ${{ secrets.LAUNCHPAD_GPG_KEY }}
+        run: |
+          set -eu
+          if [ -z "$GPG_KEY" ]; then
+            echo "LAUNCHPAD_GPG_KEY is missing"
+            exit 1
+          fi
+          printf '%s\n' "$GPG_KEY" | gpg --batch --import
+          gpg --batch --list-secret-keys --keyid-format long 516C7A148DFC4221CFD3B3BE43B17F39DD2E30C1
+
+      - name: Unlock key with passphrase
+        env:
+          GPG_PASSPHRASE: ${{ secrets.LAUNCHPAD_GPG_PASSPHRASE }}
+        run: |
+          set -eu
+          if [ -z "$GPG_PASSPHRASE" ]; then
+            echo "LAUNCHPAD_GPG_PASSPHRASE is missing"
+            exit 1
+          fi
+          echo "allow-loopback-pinentry" >> "$HOME/.gnupg/gpg-agent.conf"
+          echo "allow-preset-passphrase" >> "$HOME/.gnupg/gpg-agent.conf"
+          gpgconf --kill gpg-agent
+          keygrip="$(gpg --batch --with-colons --list-secret-keys 516C7A148DFC4221CFD3B3BE43B17F39DD2E30C1 | awk -F: '$1 == \"fpr\" { print $10; exit }')"
+          printf '%s' "$GPG_PASSPHRASE" | gpg-preset-passphrase --preset "$keygrip"
+
+      - name: Sign test file
+        run: |
+          set -eu
+          printf 'lucidgrasp passphrase check\n' > sign-test.txt
+          gpg --batch --yes --detach-sign --default-key 516C7A148DFC4221CFD3B3BE43B17F39DD2E30C1 sign-test.txt
+          gpg --batch --verify sign-test.txt.sig sign-test.txt
+          rm -f sign-test.txt sign-test.txt.sig
+          echo "PASSPHRASE OK - key unlocked and signature verified"
