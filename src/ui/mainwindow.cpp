@@ -37,9 +37,6 @@
 #include <QSpinBox>
 #include <QKeyEvent>
 #include <QStatusBar>
-// QGuiApplication forward-declares QStyleHints, so styleHints()->anything()
-// is a call on an incomplete type unless this is included. The class has
-// existed since Qt 5; only colorScheme() on it is version gated.
 #include <QStyleHints>
 #include <QTimer>
 #include <QUrl>
@@ -52,12 +49,6 @@ namespace {
 
 constexpr qreal kPi = 3.14159265358979323846;
 
-// The sun and the moon are painted rather than pulled from the desktop icon
-// theme. The freedesktop names for these -- "weather-clear" and
-// "weather-clear-night" -- resolve on Linux but come back empty on Windows, and
-// the toggle would then draw with no icon at all. Painting keeps one
-// implementation on every platform and lets the glyph take the accent colour of
-// whichever theme is active.
 QIcon paintThemeGlyph(bool dark, const QColor &colour, int logicalSize) {
   const qreal dpr = qApp->devicePixelRatio();
   const int px = qMax(1, qRound(logicalSize * dpr));
@@ -71,16 +62,6 @@ QIcon paintThemeGlyph(bool dark, const QColor &colour, int logicalSize) {
   p.scale(dpr, dpr);
 
   if (dark) {
-    // Crescent. subtracted() rather than an OddEvenFill two-ellipse path:
-    // with the latter, the parts of the bite that spill outside the main
-    // disc have odd winding too, so they get painted and the result is a
-    // symmetric difference, not a crescent.
-    //
-    // The disc is then inset and nudged right, because a crescent's ink
-    // always crowds into the lower left. These values were found by
-    // rendering candidates and centring the ink's *bounding box*, which is
-    // what the eye reads as "centred" -- a crescent's centroid can never
-    // sit on the canvas centre no matter how it is drawn.
     const qreal ox = s * 0.11, oy = s * 0.04, d = s * 0.92;
     QPainterPath disc, bite;
     disc.addEllipse(QRectF(ox, oy, d, d));
@@ -89,9 +70,6 @@ QIcon paintThemeGlyph(bool dark, const QColor &colour, int logicalSize) {
     p.setBrush(colour);
     p.drawPath(disc.subtracted(bite));
   } else {
-    // Sun: a disc ringed by eight rays. The stroke is kept light and the
-    // rays start clear of the disc, because at the 17px this is drawn at,
-    // anything heavier fuses the eight rays into a single smear.
     const QRectF core(s * 0.32, s * 0.32, s * 0.36, s * 0.36);
     p.setPen(Qt::NoPen);
     p.setBrush(colour);
@@ -102,7 +80,7 @@ QIcon paintThemeGlyph(bool dark, const QColor &colour, int logicalSize) {
     p.setPen(QPen(colour, qMax(1.0, s * 0.06), Qt::SolidLine, Qt::RoundCap));
     p.setBrush(Qt::NoBrush);
     for (int i = 0; i < 8; ++i) {
-      const qreal a = i * kPi / 4.0; // first ray points straight up
+      const qreal a = i * kPi / 4.0;
       const qreal dx = std::cos(a), dy = std::sin(a);
       p.drawLine(QPointF(mid.x() + dx * inner, mid.y() + dy * inner),
                  QPointF(mid.x() + dx * outer, mid.y() + dy * outer));
@@ -111,15 +89,6 @@ QIcon paintThemeGlyph(bool dark, const QColor &colour, int logicalSize) {
   p.end();
   return QIcon(pixmap);
 }
-
-// ----- colours taken from the desktop ---------------------------------------
-//
-// The palette the platform hands us is the only place a colour can come from if
-// the desktop is to decide the theme. Worth being precise about what that
-// actually yields: it is genuinely native on Windows, follows the GTK theme on
-// Linux when a platform-theme plugin is loaded, and on macOS it is Qt's own
-// approximation of the system colours rather than the real ones. "Let the OS
-// choose" is only ever as good as what the OS reports.
 
 double relativeLuminance(const QColor &c) {
   auto channel = [](int v) {
@@ -141,10 +110,6 @@ QColor mixToward(const QColor &from, const QColor &to, double t) {
                           from.blueF() + (to.blueF() - from.blueF()) * t);
 }
 
-// The scheme the desktop is not currently using, built by inverting lightness
-// and carrying hue and saturation through. Qt only reports and holds the
-// current scheme, so the other one has to be constructed; inverting keeps the
-// desktop's accent recognisable instead of substituting a guess for it.
 QPalette invertedPalette(const QPalette &in) {
   constexpr double kLo = 5.0, kHi = 94.0;
   QPalette out = in;
@@ -160,23 +125,23 @@ QPalette invertedPalette(const QPalette &in) {
 }
 
 struct ThemeColours {
-  QColor window;  // app background
-  QColor panel;   // group boxes
-  QColor field;   // inputs
+  QColor window;
+  QColor panel;
+  QColor field;
   QColor text;
-  QColor muted;   // secondary and disabled text
+  QColor muted;
   QColor border;
-  QColor accent;         // primary button
-  QColor onAccent;       // its label, per state: see below
-  QColor onAccentHover;  //
-  QColor onAccentPressed;      //
-  QColor accentHover;          //
-  QColor accentPressed;        // shades rather than the neutral hover, or the
-  QColor disabled;             // button turns grey.
-  QColor hover;         // neutral hover for controls sitting on @field
-  QColor pressed;       //
-  QColor itemHover;     // hover for list items, which sit on @panel
-  QColor checked;       // selected result cell
+  QColor accent;
+  QColor onAccent;
+  QColor onAccentHover;
+  QColor onAccentPressed;
+  QColor accentHover;
+  QColor accentPressed;
+  QColor disabled;
+  QColor hover;
+  QColor pressed;
+  QColor itemHover;
+  QColor checked;
   QColor onChecked;
 };
 
@@ -186,26 +151,11 @@ ThemeColours coloursFromPalette(const QPalette &p) {
   QColor window = p.color(QPalette::Window);
   const QColor base = p.color(QPalette::Base);
 
-  // The layout sets a card on a background, so the two have to differ. Plenty
-  // of themes report the same value for Window and Base, and inverting can
-  // collapse them onto the same clamp. When that happens the background is
-  // stepped away by the least amount that reads, rather than shipping a flat
-  // rectangle with a border drawn around nothing.
   if (contrastRatio(base, window) < 1.02)
     window = mixToward(window, text, 0.05);
 
-  // Cards and inputs deliberately share the content surface, and the 1px
-  // border is what separates them -- which is how the desktop draws the same
-  // pair of things.
   const QColor panel = base, field = base;
 
-  // Muted text. PlaceholderText is the role meant to supply this, but several
-  // styles leave it identical to the text colour, and QColor::operator!= also
-  // compares the colour spec, so an unstyled placeholder compares unequal to
-  // black text and would be taken at face value -- giving muted labels that
-  // are simply full-strength black. So the role is used only when it really
-  // is muted, and otherwise the text colour is washed toward the background
-  // as far as the body-text ratio allows.
   QColor muted = text;
   const QColor placeholder = p.color(QPalette::PlaceholderText);
   if (placeholder.rgb() != text.rgb() &&
@@ -221,14 +171,6 @@ ThemeColours coloursFromPalette(const QPalette &p) {
     }
   }
 
-  // Pressing a button darkens the accent, which walks it across the luminance
-  // at which a readable label has to flip between black and white. Qt's own
-  // blue sits right on that crossover: white reads 3.7:1 on the accent at
-  // rest, black 3.6:1 on the pressed state, so no single label clears the ratio
-  // across all three. Hence one label per state rather than one per button --
-  // the desktop's own label first, then black and white, whichever measures
-  // best. Most accents are dark enough that all three agree and nothing flips;
-  // it is the lighter desktop accents that need this.
   const QColor accentHover = mixToward(accent, text, 0.12);
   const QColor accentPressed = mixToward(accent, text, 0.24);
   const QColor labelOptions[] = {p.color(QPalette::HighlightedText),
@@ -279,7 +221,7 @@ ThemeColours coloursFromPalette(const QPalette &p) {
       onChecked};
 }
 
-} // namespace
+}
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent), desktopPalette_(QGuiApplication::palette()) {
@@ -289,11 +231,8 @@ MainWindow::MainWindow(QWidget *parent)
   central->setObjectName(QStringLiteral("centralWidget"));
   auto *rootLayout = new QVBoxLayout(central);
 
-  // ----- top bar: title on the left, controls on the right -----
   auto *topBar = new QHBoxLayout;
   topBar->setContentsMargins(0, 0, 0, 0);
-  // An explicit gap: with a single button the layout's own spacing was never
-  // visible, and three of them flush together read as one control.
   topBar->setSpacing(8);
 
   auto *title = new QLabel(QStringLiteral("LucidGrasp"), central);
@@ -301,9 +240,6 @@ MainWindow::MainWindow(QWidget *parent)
   topBar->addWidget(title);
   topBar->addStretch(1);
 
-  // Square, icon-only. One factory for all three so they stay the same size as
-  // a set, sized off the font so they line up with the buttons in the panels
-  // below and still grow if the user raises their system font size.
   const int side = fontMetrics().height() + 12;
   const auto makeToolButton = [&](const QString &objectName,
                                   const QString &tip) -> QPushButton * {
@@ -316,9 +252,6 @@ MainWindow::MainWindow(QWidget *parent)
     return btn;
   };
 
-  // Order is deliberate: theme, reveal, trash. The destructive control sits
-  // furthest from the two pressed constantly, so it cannot be hit by muscle
-  // memory aimed at the others.
   themeToggleBtn_ =
       makeToolButton(QStringLiteral("themeToggleBtn"), QString());
   topBar->addWidget(themeToggleBtn_);
@@ -333,10 +266,8 @@ MainWindow::MainWindow(QWidget *parent)
 
   rootLayout->addLayout(topBar);
 
-  // AFTER
   auto *bodyLayout = new QHBoxLayout;
 
-  // ----- left control panel -----
   auto *leftWidget = new QWidget(central);
   leftWidget->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
   auto *left = new QVBoxLayout(leftWidget);
@@ -409,7 +340,6 @@ MainWindow::MainWindow(QWidget *parent)
 
   bodyLayout->addWidget(leftWidget, 0, Qt::AlignTop);
 
-  // ----- results grid -----
   results_ = new QListWidget(central);
   results_->setObjectName(QStringLiteral("resultsView"));
   results_->setViewMode(QListView::IconMode);
@@ -436,18 +366,13 @@ MainWindow::MainWindow(QWidget *parent)
           &MainWindow::openResult);
   connect(revealBtn_, &QPushButton::clicked, this, &MainWindow::revealResult);
   connect(trashBtn_, &QPushButton::clicked, this, &MainWindow::trashResult);
-  // currentItemChanged rather than itemSelectionChanged: the first fires for a
-  // programmatic currentItem() too, so the buttons cannot drift out of sync
-  // with what the grid reports as current.
   connect(results_, &QListWidget::currentItemChanged, this,
            [this](QListWidgetItem *) { updateResultActions(); });
   connect(themeToggleBtn_, &QPushButton::clicked, this,
            &MainWindow::toggleTheme);
 
-  // Keyboard navigation for results grid: Enter to open, Delete to trash
   results_->installEventFilter(this);
 
-  // Before the menus, which read the stored opt-out to set their checkmark.
   updates_ = new app::UpdateChecker(this);
   connect(updates_, &app::UpdateChecker::updateAvailable, this,
           [this](const QString &tag, const QString &url,
@@ -457,9 +382,6 @@ MainWindow::MainWindow(QWidget *parent)
 
   buildMenus();
 
-  // Seed the initial theme from the desktop, then hand over to the toggle.
-  // Honouring the system here avoids flashing a white window at someone whose
-  // desktop is dark, and costs nothing because the toggle overrides it.
   darkMode_ = systemPrefersDark();
   applyTheme();
   updateActions();
@@ -476,17 +398,8 @@ MainWindow::~MainWindow() {
 void MainWindow::buildMenus() {
   QMenuBar *bar = menuBar();
 
-  // File duplicates the two Browse buttons and Quit. Not padding: it puts the
-  // keyboard route to the common actions where it belongs, and it is the second
-  // half of the point below. Written out rather than using the QMenu::addAction
-  // convenience overloads because the receiver-taking form is deprecated in Qt 6.
   QMenu *file = bar->addMenu(tr("&File"));
 
-  // Kept as members because a search worker reads index_ directly and these two
-  // actions mutate it (browseLibrary -> tryLoadIndex replaces index_). Disabling
-  // only the buttons still left Ctrl+I live during a search, which freed the
-  // entry vector under the worker. They are gated alongside the buttons in
-  // updateActions(), so the keyboard path and the click path can never diverge.
   indexAction_ = file->addAction(tr("Select &Library..."));
   indexAction_->setShortcut(QKeySequence(QStringLiteral("Ctrl+I")));
   connect(indexAction_, &QAction::triggered, this, &MainWindow::browseLibrary);
@@ -500,18 +413,12 @@ void MainWindow::buildMenus() {
   quitAction->setShortcut(QKeySequence::Quit);
   connect(quitAction, &QAction::triggered, this, &QWidget::close);
 
-  // Help is where the update check lives, and that is the reason this menu
-  // exists. The dialog offers a permanent opt-out, so there has to be a way to
-  // take it back: without a permanent entry point, "never check for updates"
-  // could only be undone by reinstalling the app.
   QMenu *help = bar->addMenu(tr("&Help"));
 
   QAction *checkAction = help->addAction(tr("&Check for Updates..."));
   checkAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+U")));
   connect(checkAction, &QAction::triggered, this, [this] {
     updateCheckManual_ = true;
-    // updates_ is constructed before the menus (see MainWindow()), so it is
-    // always live here; the guard used to imply it might not be.
     updates_->checkNow();
   });
 
@@ -533,9 +440,6 @@ void MainWindow::showUpdateDialog(const QString &tag, const QString &url,
                         app::UpdateChecker::currentVersion()));
 
   if (!notes.isEmpty()) {
-    // Release notes are markdown written for a browser and can be arbitrarily
-    // long, so they are trimmed and set as the detail line rather than the
-    // main text: that wraps them to the dialog width instead of stretching it.
     constexpr int kMaxNotes = 700;
     QString shown = notes.left(kMaxNotes).trimmed();
     if (notes.size() > kMaxNotes)
@@ -549,9 +453,6 @@ void MainWindow::showUpdateDialog(const QString &tag, const QString &url,
       box->addButton(tr("Never Check for &Updates"), QMessageBox::DestructiveRole);
   box->setDefaultButton(later);
 
-  // Non-modal on purpose. A modal box over the window would block the user out
-  // of the app they just launched, and the notice is never urgent enough to
-  // earn that.
   box->setWindowModality(Qt::NonModal);
 
   connect(open, &QAbstractButton::clicked, box, [box, url] {
@@ -560,25 +461,16 @@ void MainWindow::showUpdateDialog(const QString &tag, const QString &url,
   });
   connect(later, &QAbstractButton::clicked, box, &QDialog::accept);
   connect(never, &QAbstractButton::clicked, box, [this, box] {
-    // Same construction-order guarantee as the menu handlers above.
     updates_->setDisabled(true);
     autoUpdateAction_->setChecked(false);
     box->accept();
   });
-  // Each button closes the box above, and closing it with the window X emits
-  // finished too, so this is the single teardown path.
   connect(box, &QDialog::finished, box, &QObject::deleteLater);
 
   box->show();
 }
 
 void MainWindow::onUpdateCheckFinished(app::CheckOutcome outcome) {
-  // UpdateAvailable is already on screen as a dialog, and Suppressed means the
-  // user has said what they want. Neither needs a status-bar line.
-  // The manual/automatic distinction applies to one check only, so the flag is
-  // consumed here on every outcome. Leaving it set when an update was found
-  // (or suppressed) leaked "manual" into the next automatic check, which then
-  // complained about an unreachable GitHub exactly like a asked-for check.
   const bool wasManual = updateCheckManual_;
   updateCheckManual_ = false;
 
@@ -586,9 +478,6 @@ void MainWindow::onUpdateCheckFinished(app::CheckOutcome outcome) {
       outcome != app::CheckOutcome::Unreachable)
     return;
 
-  // A failure on the automatic schedule says nothing. Corporate proxies that
-  // inspect TLS break this check for whole offices, and a status-bar complaint
-  // every day that nobody can act on only teaches people to ignore the bar.
   if (!wasManual)
     return;
 
@@ -602,19 +491,6 @@ void MainWindow::onUpdateCheckFinished(app::CheckOutcome outcome) {
                              6000);
 }
 
-// Both pickers are deliberately left on the platform's own dialog wherever one
-// exists, so the popup carries the desktop's real colours. Forcing Qt's
-// built-in dialog instead was a mistake: it only ever helped after someone had
-// manually overridden the theme away from the system, and it cost the macOS
-// QuickLook previews and security-scoped bookmarks, and the Windows shell
-// dialog, on every single use.
-//
-// The theme is still pushed onto the instance, because that covers the case
-// where no native dialog exists at all. Qt then falls back to its own built-in
-// picker, which is a plain top-level window and so inherits neither this
-// window's stylesheet nor its palette. Unstyled, it renders as a white dialog
-// carrying our near-white text -- unreadable. This costs nothing when a native
-// dialog is used, since Qt ignores the palette for one.
 QString MainWindow::askForDirectory(const QString &title) {
   QFileDialog dlg(this, title);
   dlg.setFileMode(QFileDialog::Directory);
@@ -635,10 +511,6 @@ QString MainWindow::askForFile(const QString &title,
 }
 
 void MainWindow::browseLibrary() {
-  // A search worker iterates index_; the picker below would lead straight to
-  // tryLoadIndex() replacing the vector underneath it. The button is gated in
-  // updateActions(), but the menu action shares this slot, so the guard has to
-  // live here rather than on the widget.
   if (indexing_ || searching_)
     return;
 
@@ -651,15 +523,10 @@ void MainWindow::browseLibrary() {
 }
 
 void MainWindow::tryLoadIndex(const QString &dir) {
-  // Same guard as browseLibrary(), at the mutation site: index_.clear() and
-  // index_.load() below rewrite the vector a search worker is reading. Cheap
-  // defence in depth for any future caller that forgets to check.
   if (indexing_ || searching_)
     return;
 
   results_->clear();
-  // Fall back to the pre-1.1 cache location so existing installs keep
-  // working; the next reindex writes to the new path.
   const QString path = core::defaultIndexPath(dir);
   const QString legacy = core::legacyIndexPath(dir);
   const QString load = QFile::exists(path) ? path : legacy;
@@ -685,7 +552,7 @@ void MainWindow::startIndex() {
     return;
   }
   if (searching_)
-    return; // a search holds index_; let it finish or stop it first
+    return;
   const QString root = libEdit_->text();
   if (root.isEmpty())
     return;
@@ -702,10 +569,6 @@ void MainWindow::startIndex() {
   statusBar()->showMessage(QStringLiteral("Indexing…"));
 
   worker_ = std::thread([this, root] {
-    // Nothing may escape this thread body. An exception crossing a
-    // std::thread calls std::terminate, and OpenCV throws cv::Exception on
-    // malformed input -- which is exactly what a whole-filesystem scan of
-    // untrusted files hands it. Report the failure instead of vanishing.
     std::unique_ptr<core::ImageIndex> idx;
     bool ok = false;
     QString error;
@@ -728,8 +591,6 @@ void MainWindow::startIndex() {
       error = QStringLiteral("unknown error");
     }
 
-    // Handed over by pointer: the entry vector is no longer deep-copied
-    // twice (once into the queued event, once for a by-value parameter).
     QMetaObject::invokeMethod(
         this,
         [this, ok, error, idx = std::move(idx)]() mutable {
@@ -741,14 +602,11 @@ void MainWindow::startIndex() {
 
 void MainWindow::onIndexProgress(int done, int total, const QString &current) {
   if (total <= 0) {
-    // Discovery phase: the total file count is not known yet.
-    progress_->setRange(0, 0); // busy indicator
+    progress_->setRange(0, 0);
     stats_->setText(QStringLiteral("Scanning for images…\n%1").arg(current));
     return;
   }
   progress_->setRange(0, 100);
-  // done * 100 in int overflows past ~21.4M files (a whole-disk archive can
-  // get close); evaluate in 64 bits, then narrow a value that is in range.
   progress_->setValue(int(qint64(done) * 100 / total));
   stats_->setText(QStringLiteral("Indexing %1/%2\n%3")
                       .arg(done)
@@ -801,16 +659,12 @@ void MainWindow::stopIndex() {
   cancel_ = true;
   indexBtn_->setText(QStringLiteral("Stopping..."));
   setBusy(true);
-  indexBtn_->setEnabled(false); // stay disabled until the worker reports back
+  indexBtn_->setEnabled(false);
   statusBar()->showMessage(
       QStringLiteral("Stopping... partial index will be discarded"), 4000);
 }
 
 void MainWindow::browseQuery() {
-  // The picker opens a modal native dialog, which is wrong UX while a search
-  // or index is running, and replacing the query mid-search is at best
-  // confusing. Gated here as well as in updateActions(), the same way as
-  // browseLibrary(), so both File menu actions are covered either way.
   if (indexing_ || searching_)
     return;
 
@@ -882,13 +736,8 @@ void MainWindow::startSearch() {
   statusBar()->showMessage(QStringLiteral("Searching…"));
   searchTimer_.start();
 
-  // Runs off the GUI thread so the window stays responsive and cancellable
-  // no matter how large the library is. index_ is only read here, and the
-  // UI is locked out until onSearchFinished, so there is no shared mutation.
   const double threshold = thresholdSpin_->value() / 100.0;
   searchWorker_ = std::thread([this, query, threshold] {
-    // Same rule as the index worker: an escaping exception would abort the
-    // process, and this path decodes images from arbitrary paths.
     std::vector<core::SearchResult> results;
     bool ok = false;
     QString error;
@@ -931,9 +780,6 @@ void MainWindow::stopSearch() {
 
 void MainWindow::onSearchProgress(int done, int total) {
   if (total > 0) {
-    // Same 64-bit guard as onIndexProgress; this is also called from stage one
-    // of the search now (the in-memory prefilter over the whole index), so the
-    // label must not claim a comparison is running when it is only ranking.
     progress_->setValue(int(qint64(done) * 100 / total));
     stats_->setText(QStringLiteral("Searching %1/%2").arg(done).arg(total));
   }
@@ -977,14 +823,8 @@ void MainWindow::onSearchFinished(bool ok,
 void MainWindow::renderResults(const std::vector<core::SearchResult> &results) {
   results_->clear();
   for (const auto &r : results) {
-    // core::search already applied the threshold, and it is the only place
-    // that decides what a match is. Re-filtering here used the live widget
-    // value, which made the GUI a second source of truth that could disagree
-    // with the CLI.
     const int pct = int(r.score * 100.0 + 0.5);
 
-    // Decode straight to thumbnail size rather than loading the full
-    // image, which matters when results can be very large photographs.
     QImageReader reader(r.absPath);
     reader.setAutoTransform(true);
     const QSize native = reader.size();
@@ -999,9 +839,6 @@ void MainWindow::renderResults(const std::vector<core::SearchResult> &results) {
             .arg(pct)
             .arg(QFileInfo(r.absPath).fileName()));
     item->setData(Qt::UserRole, r.absPath);
-    // The relPath too, because that is the spelling ImageIndex keys its entries
-    // on. resolve() only needs the absolute path, but removeEntry() cannot be
-    // handed one and be expected to match.
     item->setData(Qt::UserRole + 1, r.relPath);
     item->setToolTip(
         r.absPath + QStringLiteral("\nscore: ") +
@@ -1012,12 +849,8 @@ void MainWindow::renderResults(const std::vector<core::SearchResult> &results) {
   }
 }
 
-// ----- result actions -------------------------------------------------------
-
 QListWidgetItem *MainWindow::currentResult() const {
   QListWidgetItem *item = results_->currentItem();
-  // currentItem() can be non-null with no usable path if the selection was
-  // cleared underneath us, so the data is checked rather than assumed.
   if (!item || item->data(Qt::UserRole).toString().isEmpty())
     return nullptr;
   return item;
@@ -1037,20 +870,10 @@ void MainWindow::revealResult() {
     return;
   }
 
-  // The platform work, including the freedesktop.org D-Bus reveal, lives in
-  // file_actions so it can be exercised without a window.
-  //
-  // QPointer because the reply is asynchronous and the window can be closed
-  // while it is outstanding. A raw `this` in that lambda would be a
-  // use-after-free the moment the user quit during the five second timeout.
   QPointer<MainWindow> self(this);
   ui::revealInFileManager(path, [self, dir](ui::RevealOutcome outcome) {
     if (!self)
       return;
-    // Selected is the expected outcome and needs no comment. The other two are
-    // said plainly, in the status bar rather than a modal box: they are the
-    // rare paths, and a dialog that interrupts to explain something the user
-    // can already see on their own desktop is worse than the problem itself.
     switch (outcome) {
       case ui::RevealOutcome::Selected:
         break;
@@ -1076,9 +899,6 @@ void MainWindow::trashResult() {
   const QString path = item->data(Qt::UserRole).toString();
   const QString name = QFileInfo(path).fileName();
 
-  // Destructive and unrecoverable from inside the app, so it is confirmed by
-  // name. The answer tells the user where the file went, because a trash action
-  // that silently vanishes is indistinguishable from a bug.
   const auto answer = QMessageBox::question(
       this, QStringLiteral("Move to trash"),
       QStringLiteral("Move this file to the trash?\n\n%1").arg(name),
@@ -1086,10 +906,6 @@ void MainWindow::trashResult() {
   if (answer != QMessageBox::Yes)
     return;
 
-  // moveToTrash() rather than a plain remove: on Windows it is the shell API,
-  // so the file lands in the Recycle Bin and is recoverable, which is what the
-  // button promises. A hard delete is not undoable and would be a much worse
-  // answer to an accidental click.
   QString error;
   if (!ui::moveToTrash(path, &error)) {
     QMessageBox::critical(this, QStringLiteral("Cannot delete"),
@@ -1100,18 +916,8 @@ void MainWindow::trashResult() {
     return;
   }
 
-  // Dropped from the index too, so it stops matching straight away. The cache
-  // file on disk is deliberately left alone: rewriting it here would save the
-  // whole index, which for a large library is a noticeable pause on what the
-  // user expects to be an instant action, and the entry would be gone on the
-  // next build anyway. Until then the search already skips files that no
-  // longer exist, so a stale entry cannot resurface as a ghost result.
   index_.removeEntry(item->data(Qt::UserRole + 1).toString());
 
-  // takeItem() hands ownership back, so the row is deleted here. deleteItem()
-  // would also drop the current item and the selection with it, and the grid
-  // would then report nothing selected even though there is still something to
-  // act on.
   const int row = results_->row(item);
   delete results_->takeItem(row);
 
@@ -1122,15 +928,11 @@ void MainWindow::trashResult() {
 
 void MainWindow::updateResultActions() {
   const bool haveResult = currentResult() != nullptr;
-  // Disabled rather than hidden so the buttons do not shift the grid as the
-  // selection moves between items.
   revealBtn_->setEnabled(haveResult);
   trashBtn_->setEnabled(haveResult);
 }
 
 void MainWindow::setBusy(bool busy) {
-  // While a worker holds index_ or the result set, the inputs that would
-  // invalidate them are locked out.
   browseLibBtn_->setEnabled(!busy);
   browseQueryBtn_->setEnabled(!busy);
   thresholdSpin_->setEnabled(!busy);
@@ -1145,9 +947,6 @@ void MainWindow::openResult(QListWidgetItem *item) {
 
 void MainWindow::updateActions() {
   const bool busy = indexing_ || searching_;
-  // The result actions are gated on the same lockout as everything else that
-  // reads index_. A search worker walks it, so letting a delete land mid-search
-  // would pull an entry out from under it.
   const bool canAct = !busy && currentResult() != nullptr;
   revealBtn_->setEnabled(canAct);
   trashBtn_->setEnabled(canAct);
@@ -1157,29 +956,19 @@ void MainWindow::updateActions() {
   browseQueryBtn_->setEnabled(!busy);
   searchBtn_->setEnabled(
       busy ? searching_ : (!index_.empty() && !queryEdit_->text().isEmpty()));
-  // The File menu mirrors the browse buttons. These actions replace index_
-  // via browseLibrary(), so they must be locked out for exactly the same
-  // duration as the button, or a search worker reads freed memory.
   if (indexAction_)
     indexAction_->setEnabled(!busy);
   if (queryAction_)
     queryAction_->setEnabled(!busy);
 }
 
-// ----- theme ---------------------------------------------------------------
-
 bool MainWindow::systemPrefersDark() const {
-  // QStyleHints::colorScheme() is the correct answer, but it only exists from
-  // Qt 6.5. The luminance check below works on every Qt 6 and agrees with it on
-  // the platforms that report a scheme at all, so the version guard is belt and
-  // braces rather than the primary mechanism.
 #if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
   const Qt::ColorScheme scheme = QGuiApplication::styleHints()->colorScheme();
   if (scheme == Qt::ColorScheme::Dark)
     return true;
   if (scheme == Qt::ColorScheme::Light)
     return false;
-  // Unknown, or a Qt too old to answer, falls through to the luminance check.
 #endif
   return relativeLuminance(desktopPalette_.color(QPalette::Window)) <
          relativeLuminance(desktopPalette_.color(QPalette::WindowText));
@@ -1194,18 +983,8 @@ void MainWindow::setDark(bool dark) {
 
 void MainWindow::toggleTheme() { setDark(!darkMode_); }
 
-// The bin glyph. Painted rather than taken from a themed icon because Qt 6.4
-// has no QFileIconProvider::Trash, and the app ships no icon assets.
-//
-// Repainted on every theme change rather than once at construction: the ink
-// colour comes from the palette, which applyTheme() replaces, so a bin painted
-// during construction ends up dark ink on the dark background -- invisible on
-// exactly the desktops that need it most.
 QIcon MainWindow::paintTrashGlyph(int logicalSize, const QColor &ink,
                                  const QColor &faded) {
-  // Drawn as one path and rendered twice, rather than two separate paint
-  // routines: the second pass has to be the identical shape in a different
-  // colour, and a copy that can drift is a copy that will.
   const auto draw = [&](const QColor &colour) {
     const qreal s = logicalSize;
     const qreal dpr = qApp->devicePixelRatio();
@@ -1218,17 +997,13 @@ QIcon MainWindow::paintTrashGlyph(int logicalSize, const QColor &ink,
     p.scale(dpr, dpr);
     p.setPen(QPen(colour, qMax(1.0, s * 0.09)));
     p.setBrush(Qt::NoBrush);
-  // Handle standing above the lid.
     p.drawLine(QPointF(s * 0.34, s * 0.30), QPointF(s * 0.40, s * 0.16));
     p.drawLine(QPointF(s * 0.40, s * 0.16), QPointF(s * 0.60, s * 0.16));
     p.drawLine(QPointF(s * 0.60, s * 0.16), QPointF(s * 0.66, s * 0.30));
-    // Lid, wider than the body so the two do not read as one shape.
     p.drawLine(QPointF(s * 0.10, s * 0.30), QPointF(s * 0.90, s * 0.30));
-    // Tapered body.
     p.drawLine(QPointF(s * 0.18, s * 0.30), QPointF(s * 0.26, s * 0.88));
     p.drawLine(QPointF(s * 0.26, s * 0.88), QPointF(s * 0.74, s * 0.88));
     p.drawLine(QPointF(s * 0.74, s * 0.88), QPointF(s * 0.82, s * 0.30));
-    // Two ribs, so an empty outline still reads as a bin rather than a box.
     p.drawLine(QPointF(s * 0.40, s * 0.46), QPointF(s * 0.42, s * 0.72));
     p.drawLine(QPointF(s * 0.60, s * 0.46), QPointF(s * 0.58, s * 0.72));
     p.end();
@@ -1237,38 +1012,18 @@ QIcon MainWindow::paintTrashGlyph(int logicalSize, const QColor &ink,
 
   QIcon bin;
   bin.addPixmap(draw(ink), QIcon::Normal, QIcon::On);
-  // A second, faded rendering registered as the Disabled state rather than one
-  // icon swapped by the caller. Doing it this way means the enabled and
-  // disabled pixels can never disagree about the shape, and Qt picks the right
-  // one on its own -- including for hover and focus states, which a manual swap
-  // on setEnabled() would miss.
   bin.addPixmap(draw(faded), QIcon::Disabled, QIcon::On);
   return bin;
 }
 
 void MainWindow::updateResultIcons() {
-  // The folder glyph comes from the platform rather than being painted, so it
-  // matches the desktop's own icons. Requested fresh rather than cached because
-  // a themed QIcon resolves against the palette in force when it is painted, and
-  // the one cached during construction was resolved against the old palette.
   QFileIconProvider provider;
   revealBtn_->setIcon(provider.icon(QFileIconProvider::Folder));
 
-  // Red for the destructive action. Hue is fixed rather than derived from the
-  // palette, because no palette has a "danger" role and inventing one from the
-  // accent would produce something orange or pink on some desktops -- a
-  // destructive control that does not read as destructive.
-  //
-  // Lightness is picked per theme, though, and not scaled from a single red:
-  // the same value that is legible on a white bar becomes mud on a near-black
-  // one. Both are checked against the measured window background rather than
-  // assumed to clear a contrast ratio.
   const bool dark = relativeLuminance(palette().color(QPalette::Window)) <
                     relativeLuminance(palette().color(QPalette::WindowText));
   const QColor ink =
       dark ? QColor(0xE5, 0x6A, 0x6A) : QColor(0xC0, 0x36, 0x2C);
-  // Disabled: the same hue pulled toward the background, so it reads as "not
-  // available" instead of as a dimmer warning.
   const QColor faded = mixToward(ink, palette().color(QPalette::Window), 0.55);
   trashBtn_->setIcon(
       paintTrashGlyph(trashBtn_->iconSize().width(), ink, faded));
@@ -1278,8 +1033,6 @@ void MainWindow::updateThemeGlyph() {
   themeToggleBtn_->setIcon(
       paintThemeGlyph(darkMode_, palette().color(QPalette::Link),
                       themeToggleBtn_->iconSize().width()));
-  // The glyph shows the current theme; the tooltip has to name the other one,
-  // because an icon on its own gives no hint of what clicking will do.
   themeToggleBtn_->setToolTip(darkMode_
                                   ? QStringLiteral("Switch to light mode")
                                   : QStringLiteral("Switch to dark mode"));
@@ -1289,15 +1042,6 @@ void MainWindow::equalizePanelHeights() {
   if (!libGroup_ || !queryGroup_ || panelsSized_)
     return;
 
-  // Measured exactly once, before anything is pinned. A QGroupBox's size hint
-  // is floored by its own minimum height, so reading it back after pinning
-  // would be a ratchet: the pair could only ever grow, and the taller panel
-  // would drag the shorter one up on every re-measure.
-  //
-  // Fixed heights rather than minimums, because a fixed height also raises
-  // the window's minimum size hint. The two panels therefore cannot be
-  // squeezed to different heights by a short window -- the window simply
-  // refuses to become shorter than they are.
   const int tallest = std::max(libGroup_->sizeHint().height(),
                                queryGroup_->sizeHint().height());
   libGroup_->setFixedHeight(tallest);
@@ -1307,30 +1051,13 @@ void MainWindow::equalizePanelHeights() {
 
 void MainWindow::showEvent(QShowEvent *event) {
   QMainWindow::showEvent(event);
-  // Deferred to here rather than the constructor: sizeHint() is only
-  // trustworthy once the widget has its final font metrics, which arrive
-  // after polish.
   equalizePanelHeights();
 
-  // The update check goes out from here rather than the constructor because it
-  // is a network round trip, and the window must not wait on it to appear. The
-  // delay is not for the network's sake: it lets the window paint first, so an
-  // available update raises its box over a finished window instead of a white
-  // flash. The checker applies its own opt-out and daily throttle, so this
-  // fires on every launch and costs nothing on all but one.
   QTimer::singleShot(500, this,
                      [this] { updates_->checkOnStartup(); });
 }
 
 void MainWindow::applyThemeTo(QWidget *target) const {
-  // Every colour below comes out of the palette the desktop reports. When the
-  // toggle agrees with the desktop, that palette is used exactly as given. When
-  // it disagrees -- someone has overridden the theme by hand -- the opposite
-  // scheme is built from it, because Qt 6.4 can neither report nor hold a
-  // palette for the scheme the desktop is not currently using.
-  // desktopPalette_, not QGuiApplication::palette(): the latter has by now been
-  // overwritten with the derived theme, so reading it would make this a
-  // derivation of the previous derivation.
   const bool osIsDark =
       relativeLuminance(desktopPalette_.color(QPalette::Window)) <
       relativeLuminance(desktopPalette_.color(QPalette::WindowText));
@@ -1366,8 +1093,6 @@ QLineEdit, QSpinBox {
 }
 QLineEdit:read-only { color: @muted; }
 QLineEdit:focus, QSpinBox:focus { border-color: @accent; }
-/* The arrows are left to Qt to draw from the palette rather than replaced with
-   images, so they stay legible in both themes. */
 QSpinBox { padding-right: 20px; }
 QSpinBox::up-button, QSpinBox::down-button {
     subcontrol-origin: border; width: 18px; background: transparent;
@@ -1399,9 +1124,6 @@ QPushButton:disabled { color: @muted; border-color: @border; }
     background: @disabled; color: @muted; border-color: @border;
 }
 
-/* The general button rule pads 6px/14px for a text label. The three top-bar
-   controls hold only an icon at a fixed square size, so the padding has to go or
-   it squeezes the glyph and inflates the widget. */
 #themeToggleBtn, #revealBtn, #trashBtn { padding: 0; }
 
 QProgressBar {
@@ -1431,8 +1153,6 @@ QScrollBar::handle:horizontal {
 QScrollBar::add-line, QScrollBar::sub-line { height: 0; width: 0; }
 QScrollBar::add-page, QScrollBar::sub-page { background: none; }
 
-/* A popup menu is a top-level widget with its own surface, so it is given the
-   panel colour explicitly rather than inheriting the window's. */
 QMenuBar {
     background: @panel; color: @text; border-bottom: 1px solid @border;
 }
@@ -1456,11 +1176,6 @@ QToolTip {
 }
 )CSS");
 
-  // One substitution table keeps light and dark differing only by colour, so
-  // the layout above cannot drift out of sync between the two themes.
-  // Longest token first: @accentHover begins with @accent, so replacing
-  // @accent before @accentHover would leave "#308cc6Hover" in the sheet, which
-  // Qt parses as an unknown colour and drops silently.
   QVector<QPair<QString, QColor>> vars = {
       {QStringLiteral("@window"), c.window},
       {QStringLiteral("@panel"), c.panel},
@@ -1491,11 +1206,6 @@ QToolTip {
 
   target->setStyleSheet(qss);
 
-  // The stylesheet covers the widgets it names, but parts Qt draws natively
-  // from the palette -- spin box arrows, and anything in a dialog -- are
-  // unaffected by it and would come out dark-on-dark. Setting the palette to
-  // match closes that gap, and covers the file and message dialogs too,
-  // which inherit this palette as children of the window.
   QPalette pal;
   pal.setColor(QPalette::Window, c.window);
   pal.setColor(QPalette::WindowText, c.text);
@@ -1514,8 +1224,6 @@ QToolTip {
   pal.setColor(QPalette::Mid, c.border);
   pal.setColor(QPalette::Dark, c.border.darker(140));
   pal.setColor(QPalette::Shadow, Qt::black);
-  // Disabled text is the muted colour, so a greyed control still reads as
-  // disabled rather than as a differently-coloured enabled one.
   pal.setColor(QPalette::Disabled, QPalette::WindowText, c.muted);
   pal.setColor(QPalette::Disabled, QPalette::Text, c.muted);
   pal.setColor(QPalette::Disabled, QPalette::ButtonText, c.muted);
@@ -1533,7 +1241,6 @@ void MainWindow::dropEvent(QDropEvent *event) {
   if (urls.isEmpty())
     return;
 
-  // Take the first valid local file/directory
   for (const QUrl &url : urls) {
     if (!url.isLocalFile())
       continue;
@@ -1543,16 +1250,14 @@ void MainWindow::dropEvent(QDropEvent *event) {
       continue;
 
     if (info.isDir()) {
-      // Drop a folder -> set as library
       libEdit_->setText(path);
       tryLoadIndex(path);
     } else if (info.isFile() && core::isSupportedImage(path)) {
-      // Drop an image -> set as query
       queryEdit_->setText(path);
       showPreview(path);
       updateActions();
     }
-    break; // Only handle the first valid item
+    break;
   }
   event->acceptProposedAction();
 }
@@ -1560,12 +1265,6 @@ void MainWindow::dropEvent(QDropEvent *event) {
 void MainWindow::applyTheme() {
   applyThemeTo(this);
 
-  // A palette set on a widget propagates only to that widget's children. A
-  // dialog is a top-level window with no parent, so it keeps the platform
-  // default palette -- a white file dialog -- while still picking up our
-  // stylesheet's near-white text, which is how the popup ended up white on
-  // white. Setting it application-wide covers every dialog, including the
-  // message boxes, which have the same problem.
   qApp->setPalette(palette());
 
   updateThemeGlyph();

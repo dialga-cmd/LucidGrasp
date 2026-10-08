@@ -29,6 +29,7 @@ jobs:
   launchpad:
     name: Launchpad PPA
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -61,7 +62,6 @@ jobs:
         run: |
           printf '%s\n' "$GPG_KEY" | gpg --batch --import
           gpg --batch --list-secret-keys --keyid-format long "$LP_GPG_KEY_ID"
-          # Allow non-interactive signing: preset the passphrase in gpg-agent.
           echo "allow-loopback-pinentry" >> "$HOME/.gnupg/gpg-agent.conf"
           echo "allow-preset-passphrase" >> "$HOME/.gnupg/gpg-agent.conf"
           gpgconf --kill gpg-agent
@@ -78,14 +78,11 @@ jobs:
           set -eu
           work="$PWD/pkg"
           mkdir -p "$work"
-          # Full source tree for the debian/ build.
           git archive --format=tar --prefix="lucidgrasp-${VERSION}/" HEAD \
             | tar -x -C "$work"
-          # Upstream orig tarball: same tree without debian/, deterministic gzip.
           git archive --format=tar --prefix="lucidgrasp-${VERSION}/" HEAD \
             -- . ':(exclude)debian' | gzip -9n > "$work/lucidgrasp_${VERSION}.orig.tar.gz"
           cd "$work/lucidgrasp-${VERSION}"
-          # Ephemeral changelog entry for this release (repo changelog untouched).
           debchange \
             --newversion "${VERSION}-1" \
             --distribution noble \

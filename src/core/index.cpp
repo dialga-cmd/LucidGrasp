@@ -22,28 +22,15 @@ namespace core {
 
 namespace {
 
-constexpr quint32 kMagic = 0x494D5349; // "IMSI"
-// v2 adds the source file's size and mtime, so a search can tell that an
-// indexed file has changed and refresh its features instead of comparing a
-// query against hashes for pixels that are no longer there. v1 caches are
-// rejected and rebuilt rather than silently trusted.
+constexpr quint32 kMagic = 0x494D5349;
 constexpr quint32 kVersion = 2;
 
-// Guards against pathological nesting in a whole-filesystem scan.
 constexpr int kMaxScanDepth = 64;
 
 const QSet<QString> &systemDirNames()
 {
-  // Names are lower-case on every platform; the resolve-path check in
-  // isSystemPath() is the authority, the prefilter is just a cheap "maybe".
   static const QSet<QString> names = {
 #ifdef Q_OS_WIN
-      // Windows mounts no kernel pseudo-filesystem under a drive letter, but a
-      // whole-drive scan of C:\ would walk hours of OS internals and junctions
-      // (DriverStore, System32, ...) for essentially no indexable images.
-      // These names are only skipped when the resolved path puts them directly
-      // under a drive root, so an unrelated user folder further down the tree
-      // that happens to share a name is never touched.
       QStringLiteral("windows"),
       QStringLiteral("program files"),
       QStringLiteral("program files (x86)"),
@@ -53,8 +40,6 @@ const QSet<QString> &systemDirNames()
       QStringLiteral("recovery"),
       QStringLiteral("perflogs"),
 #else
-      // Kernel and device pseudo-filesystems: virtual, non-persistent, and
-      // either enormous or permission-hostile to walk.
       QStringLiteral("proc"), QStringLiteral("sys"),
       QStringLiteral("dev"),  QStringLiteral("run"),
 #endif
@@ -67,14 +52,11 @@ bool isSystemPath(const QString &path)
   if (path.isEmpty())
     return false;
 #ifdef Q_OS_WIN
-  // A drive-root system folder or descendant, e.g. "C:/Windows" or
-  // "C:/Windows/System32". The resolved path uses forward slashes; the drive
-  // letter may be either case.
   const QString cleaned = QDir::fromNativeSeparators(path);
   if (cleaned.size() < 3 || cleaned.at(1) != QLatin1Char(':') ||
       cleaned.at(2) != QLatin1Char('/'))
     return false;
-  const QString rest = cleaned.mid(3); // strip drive root "C:/"
+  const QString rest = cleaned.mid(3);
   for (const QString &n : systemDirNames()) {
     if (rest.compare(n, Qt::CaseInsensitive) == 0 ||
         rest.startsWith(n + QLatin1Char('/'), Qt::CaseInsensitive))
@@ -91,22 +73,12 @@ bool isSystemPath(const QString &path)
 #endif
 }
 
-// Absolute, symlink-resolved form of a library root. Falls back to the plain
-// absolute path when the root does not exist yet.
 QString resolveRoot(const QString &rootDir)
 {
   const QString canonical = QFileInfo(rootDir).canonicalFilePath();
   return canonical.isEmpty() ? QDir(rootDir).absolutePath() : canonical;
 }
 
-// Walk the tree collecting candidate files. Returns false from `keepGoing` to
-// abandon the walk. Unreadable directories are skipped rather than treated as
-// errors.
-//
-// Symlinked directories are followed, because icon themes and shared asset
-// directories are routinely symlinked and skipping them would silently drop
-// large parts of a library. Cycles are prevented by de-duplicating resolved
-// paths of symlinked directories, which is the only way a traversal can loop.
 bool collectImages(const QString &startDir, QStringList &out,
                    const std::function<bool(int)> &keepGoing)
 {
@@ -130,32 +102,23 @@ bool collectImages(const QString &startDir, QStringList &out,
                                 QDir::Name);
     for (const QFileInfo &fi : entries) {
       if (fi.isDir()) {
-        // The leaf name is only a cheap pre-filter; the resolved path is what
-        // decides. Matching on the name alone silently swallowed any user
-        // folder that happened to be called "dev", "sys", or "run", and those
-        // losses were invisible because they never reached the error counter.
-        // Lower-cased so the pre-filter matches on a case-insensitive file
-        // system; the authoritative isSystemPath() call below still requires
-        // the real path to be a system root, so this cannot over-match.
         const QString canonical = fi.canonicalFilePath();
         const bool isLinkOrJunction = !canonical.isEmpty() && canonical != fi.absoluteFilePath();
         if ((systemDirNames().contains(fi.fileName().toLower()) ||
              isLinkOrJunction) &&
             isSystemPath(canonical)) {
-          continue; // kernel or device pseudo-filesystem
+          continue;
         }
         const QString path = fi.absoluteFilePath();
         if (fi.isSymLink()) {
           if (canonical.isEmpty())
-            continue; // broken link
+            continue;
           if (visitedSymlinks.contains(canonical))
-            continue; // already walked this target; breaks cycles
+            continue;
           visitedSymlinks.insert(canonical);
         }
         if (depth + 1 > kMaxScanDepth)
           continue;
-        // Traverse via the link path so recorded relative paths stay under the
-        // scanned root; the resolved path is used only for cycle detection.
         pending.push({path, depth + 1});
       } else if (fi.isFile() && isSupportedImage(fi.fileName())) {
         out.append(fi.absoluteFilePath());
@@ -165,11 +128,9 @@ bool collectImages(const QString &startDir, QStringList &out,
   return true;
 }
 
-} // namespace
+}
 
 QString defaultIndexPath(const QString &rootDir) {
-  // Built from the generic data location rather than AppDataLocation, which
-  // would repeat the organisation and application name in the path.
   QString base = QStandardPaths::writableLocation(
       QStandardPaths::GenericDataLocation);
   if (base.isEmpty())
@@ -179,13 +140,8 @@ QString defaultIndexPath(const QString &rootDir) {
   const QString dir = base + QStringLiteral("/indexes");
   QDir().mkpath(dir);
 
-  // Resolve to a real path first: the cache is keyed by the library it
-  // describes, so a relative root such as "." must not collide with a
-  // different directory that happens to be spelled the same way.
   const QString root = resolveRoot(rootDir);
 
-  // Readable label plus a digest of the resolved path, so two libraries with
-  // the same folder name never collide.
   QString label = QDir(root).dirName();
   if (label.isEmpty())
     label = QStringLiteral("root");
@@ -212,7 +168,6 @@ const QSet<QString>& supportedImageExtensionSet() {
     const QList<QByteArray> formats = QImageReader::supportedImageFormats();
     for (const QByteArray &f : formats)
       exts.insert(QString::fromLatin1(f).toLower());
-    // These always load through the Qt base image readers.
     exts << QStringLiteral("png") << QStringLiteral("jpg")
          << QStringLiteral("jpeg") << QStringLiteral("bmp")
          << QStringLiteral("gif");
@@ -234,7 +189,7 @@ QStringList supportedImageExtensions() {
 bool isSupportedImage(const QString &path) {
   const int dot = path.lastIndexOf(QLatin1Char('.'));
   if (dot <= 0 || dot == path.size() - 1)
-    return false; // non-empty extension required
+    return false;
   return supportedImageExtensionSet().contains(path.mid(dot + 1).toLower());
 }
 
@@ -249,9 +204,6 @@ bool ImageIndex::build(const QString &rootDir, ProgressFn progress) {
   QElapsedTimer progressTimer;
   progressTimer.start();
 
-  // Phase 1: discover candidate files. total == 0 signals "still scanning".
-  // Reports are throttled using a timer so we don't spam the UI queue
-  // and we don't freeze the UI.
   QStringList files;
   const bool complete = collectImages(
       root_, files, [&](int seen) {
@@ -263,11 +215,10 @@ bool ImageIndex::build(const QString &rootDir, ProgressFn progress) {
         return progress({0, 0, QStringLiteral("%1 directories").arg(seen)});
       });
   if (!complete)
-    return false; // cancelled
+    return false;
   if (progress)
     progress({0, 0, QStringLiteral("%1 images found").arg(files.size())});
 
-  // Phase 2: extract features, with a real total for the progress bar.
   const int total = files.size();
   int done = 0;
 
@@ -276,7 +227,7 @@ bool ImageIndex::build(const QString &rootDir, ProgressFn progress) {
       if (progressTimer.elapsed() >= 50 || done == total - 1) {
         progressTimer.restart();
         if (!progress({done, total, file}))
-          return false; // cancelled
+          return false;
       }
     }
 
@@ -298,13 +249,6 @@ bool ImageIndex::build(const QString &rootDir, ProgressFn progress) {
 }
 
 bool ImageIndex::save(const QString &filePath) const {
-  // QSaveFile writes to a sibling temp file and only renames it over the target
-  // on commit(), atomically and on every platform. Writing straight to the
-  // target meant a crash, a kill, or a full disk mid-write left a truncated file
-  // where a good cache used to be, and the next launch could not tell "never
-  // indexed" from "index destroyed" -- so an interrupted save threw away a
-  // whole-filesystem reindex. Committing or not committing, the cache on disk is
-  // always a complete one.
   QSaveFile f(filePath);
   if (!f.open(QIODevice::WriteOnly))
     return false;
@@ -321,14 +265,9 @@ bool ImageIndex::save(const QString &filePath) const {
                      kHistBins);
   }
 
-  // A stream error does not necessarily surface as a device error, so it is
-  // checked separately. Returning without committing leaves the previous cache
-  // untouched: QSaveFile discards its temp file when it is not committed.
   if (out.status() != QDataStream::Ok)
     return false;
 
-  // commit() flushes and closes before the rename, so a failure that only shows
-  // up at close cannot be promoted into a valid-looking cache.
   return f.commit();
 }
 
@@ -345,28 +284,11 @@ bool ImageIndex::load(const QString &filePath) {
   quint32 magic = 0, version = 0, count = 0;
   qint32 errors = 0;
   in >> magic >> version >> root_ >> errors >> count;
-  // Clear on every failure path: root_ has already been overwritten by the
-  // stream above, and leaving it set against an empty entry list breaks the
-  // class invariant that a root only describes a populated index.
   if (in.status() != QDataStream::Ok || magic != kMagic || version != kVersion) {
     clear();
     return false;
   }
 
-  // Each entry is a path, three 64-bit hashes (fileHash/phash/dhash), two 64-bit
-  // metadata fields (size/mtimeMs) and the histogram, so a file claiming more
-  // entries than it could physically hold is corrupt. Resizing to an unchecked
-  // count would attempt an enormous allocation.
-  //
-  // Only the fixed-width part is counted, and the path is excluded because it is
-  // variable-length: this has to be a strict *lower* bound, or a legitimate
-  // cache is rejected as corrupt and silently reindexed on every launch. The
-  // previous arithmetic counted seven 64-bit fields where only five are written,
-  // putting the bound at 312 bytes against a true minimum of 296 plus the path.
-  // In practice that only bites when entries carry relative paths shorter than
-  // six characters in large numbers, so this is a latent robustness fix rather
-  // than a bug with an everyday symptom -- but the bound is now correct, and it
-  // can only ever err by rejecting, never by accepting a corrupt file.
   constexpr qint64 kMinBytesPerEntry = 5 * sizeof(quint64) + kHistBins;
   if (qint64(count) * kMinBytesPerEntry > f.size()) {
     clear();
@@ -404,26 +326,15 @@ std::vector<SearchResult> ImageIndex::search(const Features &query,
   if (entries_.empty())
     return results;
 
-  // --- Stage 1: in-memory shortlist -----------------------------------
-  // Reads only the stored hashes. We use a relaxed prefilter threshold to catch
-  // anything that OpenCV might push above the final threshold.
   struct Candidate {
     double prefilter = 0.0;
     uint32_t entry = 0;
     bool exact = false;
   };
 
-  // Byte-identical copies are always retained, whatever the prefilter says, so
-  // they are collected separately and never compete for a shortlist slot.
   std::vector<Candidate> exactHits;
   std::vector<Candidate> pool;
-  // OpenCV contributes 0.8, prefilter 0.2. So max possible score is 0.8 + 0.2 * prefilter.
-  // We only keep candidates where max possible score >= threshold.
   for (size_t i = 0; i < entries_.size(); ++i) {
-    // Stage one is pure in-memory arithmetic, but it still walks the entire
-    // index, so the cancellation callback is consulted here too (throttled:
-    // once per 8192 entries plus the final one). Without this, Stop is inert
-    // for the first pass over a six-figure whole-filesystem index.
     if (progress &&
         (i % 8192 == 0 || i + 1 == entries_.size()) &&
         !progress(static_cast<int>(i), static_cast<int>(entries_.size())))
@@ -437,11 +348,6 @@ std::vector<SearchResult> ImageIndex::search(const Features &query,
     }
   }
 
-  // Keep only the strongest kMinShortlist. This is the step that makes the
-  // architecture work: without a cap the relaxed bound above is satisfied by
-  // every entry for any threshold at or below 0.8, so the entire library would
-  // be decoded and scored. nth_element picks the top slice without paying for a
-  // full sort, which matters when the index holds a whole filesystem.
   const auto stronger = [](const Candidate &a, const Candidate &b) {
     return a.prefilter > b.prefilter;
   };
@@ -457,7 +363,6 @@ std::vector<SearchResult> ImageIndex::search(const Features &query,
                 std::make_move_iterator(pool.begin()),
                 std::make_move_iterator(pool.end()));
 
-  // --- Stage 2: OpenCV re-score of the shortlist -------------------
   CvMatcher matcher;
   const CvMatcher::Prepared preparedQuery = matcher.prepare(queryImage);
 
@@ -473,7 +378,7 @@ std::vector<SearchResult> ImageIndex::search(const Features &query,
       if (progressTimer.elapsed() >= 50 || done == total - 1) {
         progressTimer.restart();
         if (!progress(done, total))
-          return {}; // cancelled
+          return {};
       }
     }
 
@@ -483,18 +388,11 @@ std::vector<SearchResult> ImageIndex::search(const Features &query,
     r.absPath = root.absoluteFilePath(e.relPath);
     r.exact = ranked[k].exact;
 
-    // File gone since indexing: nothing left to score. Without this check a
-    // deleted file kept its stale prefilter, decoded to null, and re-appeared
-    // as a ghost at ~0.2 * prefilter whenever the threshold was low enough.
     if (!QFile::exists(r.absPath)) {
       ++done;
       continue;
     }
 
-    // If the file changed since it was indexed, the stored hashes no longer
-    // describe it, so the prefilter term would be scored against pixels that
-    // are not there. Refresh it. This is the same work indexing does, and it
-    // only happens for files that moved under a stale cache.
     double prefilter = ranked[k].prefilter;
     bool exact = ranked[k].exact;
     if (isStale(e.features, r.absPath)) {
@@ -506,8 +404,6 @@ std::vector<SearchResult> ImageIndex::search(const Features &query,
       }
     }
 
-    // Decoded straight to a small size rather than at full resolution, which
-    // matters because the shortlist is decoded once per query.
     const CvMatcher::Prepared preparedCandidate = matcher.prepare(
         loadScaled(r.absPath, 512));
     r.score = 0.8 * matcher.match(preparedQuery, preparedCandidate) +
@@ -537,9 +433,6 @@ bool ImageIndex::searchFile(const QString &queryPath, double threshold,
   QImage queryImg;
   if (!extractFeatures(queryPath, feat, &queryImg))
     return false;
-  // Routed through loadScaled in extractFeatures, which keeps the query and the
-  // index on one resolution, and applies EXIF orientation. Reusing queryImg here
-  // avoids decoding the same file twice.
   out = search(feat, queryImg, threshold, std::move(progress));
   return true;
 }
@@ -561,4 +454,4 @@ bool ImageIndex::removeEntry(const QString &relPath) {
   return true;
 }
 
-} // namespace core
+}

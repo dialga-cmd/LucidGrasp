@@ -10,6 +10,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -47,16 +48,19 @@ jobs:
           cp lucidgrasp.png AppDir/usr/share/icons/hicolor/256x256/apps/io.github.dialga_cmd.LucidGrasp.png
           cp io.github.dialga_cmd.LucidGrasp.desktop AppDir/usr/share/applications/io.github.dialga_cmd.LucidGrasp.desktop
 
-          # Create AppRun script
+          cp io.github.dialga_cmd.LucidGrasp.desktop AppDir/
+          cp lucidgrasp.png AppDir/io.github.dialga_cmd.LucidGrasp.png
+
           echo '#!/bin/sh' > AppDir/AppRun
           echo 'exec "$APPDIR/usr/bin/LucidGrasp" "$@"' >> AppDir/AppRun
           chmod +x AppDir/AppRun
 
       - name: Package AppImage
         run: |
-          ./appimagetool AppDir LucidGrasp-x86_64.AppImage
+          APPIMAGE_EXTRACT_AND_RUN=1 ./appimagetool AppDir LucidGrasp-x86_64.AppImage
 
       - name: Upload Artifact
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: LucidGrasp-AppImage

@@ -87,18 +87,12 @@ QImage hueShift(const QImage& in, int delta)
     return img;
 }
 
-// ORB keys off corners and texture, and the scenes above are smooth gradients
-// with flat fills, so they yield almost no keypoints. Every comparison against
-// them scores ORB as exactly 0.0, which means the 35% ORB share of the final
-// score can silently die and the ranking assertions still pass. This scene is
-// deliberately speckled so the detector has something to find.
 QImage texturedScene()
 {
     QImage img(320, 240, QImage::Format_RGB32);
     QPainter p(&img);
     p.fillRect(img.rect(), QColor(60, 70, 90));
 
-    // xorshift, so the texture is byte-for-byte reproducible across runs.
     quint32 seed = 0x9E3779B9u;
     const auto next = [&seed] {
         seed ^= seed << 13;
@@ -106,8 +100,6 @@ QImage texturedScene()
         seed ^= seed << 5;
         return seed;
     };
-    // Blocky rather than per-pixel, so FAST sees genuine edges instead of
-    // isolated impulses.
     for (int by = 0; by < 240; by += 4)
         for (int bx = 0; bx < 320; bx += 4) {
             const int v = int(next() % 200) + 20;
@@ -123,9 +115,6 @@ QImage texturedScene()
     return img;
 }
 
-// The edit class this tool exists to survive: structure held, exposure and
-// contrast moved. Brightness is the DC coefficient of the pHash DCT, so this is
-// also the change that a DC-inclusive hash handles worst.
 QImage exposureShift(const QImage& in, double gain, double bias)
 {
     QImage img = in.convertToFormat(QImage::Format_RGB888);
@@ -160,31 +149,16 @@ void printResults(const std::vector<core::SearchResult>& results)
     }
 }
 
-} // namespace
+}
 
 int runSelfTest()
 {
     int failures = 0;
 
-    // Unique per process. A fixed path made concurrent runs destructive to each
-    // other: both used the same library and query directories and both cleared
-    // them on entry, so one run's removeRecursively() deleted the corpus the
-    // other was halfway through reading. The symptom was "missing expected
-    // textured results" appearing in one of two simultaneous runs and never on
-    // its own -- the kind of intermittent failure that gets misfiled as a flaky
-    // test rather than as the shared mutable state it actually was.
-    //
-    // The PID is used rather than a timestamp because two selftests can start
-    // within the same clock tick, and the name has to be unique on the machine,
-    // not merely unlikely to collide.
     const QString base = QDir::tempPath() +
                          QStringLiteral("/lucidgrasp_selftest_") +
                          QString::number(QCoreApplication::applicationPid());
     QDir(base).removeRecursively();
-    // Left behind on purpose. Removing it at the end would be tidier, but a run
-    // that dies mid-way would then leave nothing to inspect, and the corpus is
-    // the evidence when a case fails. A directory per PID means the leftovers
-    // cannot grow without bound across normal use.
     QDir(base).mkpath(QStringLiteral("."));
     const QString lib = base + QStringLiteral("/library");
     const QString qdir = base + QStringLiteral("/query");
@@ -195,16 +169,13 @@ int runSelfTest()
     const QString original = lib + QStringLiteral("/original.png");
     a.save(original, "PNG");
 
-    // Byte-identical copies.
     QFile::copy(original, lib + QStringLiteral("/copy.png"));
 
-    // Variants.
     a.scaled(a.size() / 2, Qt::IgnoreAspectRatio, Qt::SmoothTransformation)
         .save(lib + QStringLiteral("/resized.png"), "PNG");
     a.save(lib + QStringLiteral("/recompressed.jpg"), "JPG", 70);
     hueShift(a, 50).save(lib + QStringLiteral("/hueshift.png"), "PNG");
 
-    // Distractors.
     sceneB().save(lib + QStringLiteral("/sceneB.png"), "PNG");
     sceneC().save(lib + QStringLiteral("/sceneC.png"), "PNG");
 
@@ -216,7 +187,6 @@ int runSelfTest()
     std::printf("Indexed %zu images (%d skipped)\n\n",
                 size_t(index.size()), index.errorCount());
 
-    // --- Case 1: byte-identical query ---
     const QString qExact = qdir + QStringLiteral("/exact_query.png");
     QFile::copy(original, qExact);
 
@@ -244,12 +214,6 @@ int runSelfTest()
                         exactCount);
             ++failures;
         } else if (r1[0].score < 0.9 || r1[1].score < 0.9) {
-            // These scenes are smooth gradients with no corners, so ORB finds
-            // nothing: the score used to cap at ~0.72 no matter how identical
-            // the pair, which made the threshold mean different things on
-            // textured and keypoint-free image sets. Silence from ORB is no
-            // evidence of dissimilarity, so the signals that did run are
-            // renormalised and an identical pair must land near 1.0.
             std::printf("FAIL: exact copies scored %.3f/%.3f; a keypoint-free "
                         "pair should reach ~1.0, not the ORB-silent ceiling\n\n",
                         r1[0].score, r1[1].score);
@@ -261,7 +225,6 @@ int runSelfTest()
         }
     }
 
-    // --- Case 2: visually similar query (60%% rescale, not in library) ---
     const QString qSim = qdir + QStringLiteral("/similar_query.png");
     a.scaled(a.size() * 6 / 10, Qt::IgnoreAspectRatio, Qt::SmoothTransformation)
         .save(qSim, "PNG");
@@ -314,7 +277,6 @@ int runSelfTest()
         }
     }
 
-    // --- Case 3: index round-trip ---
     const QString idxPath = base + QStringLiteral("/index.bin");
     core::ImageIndex reloaded;
     if (!index.save(idxPath) || !reloaded.load(idxPath)
@@ -326,8 +288,6 @@ int runSelfTest()
                     size_t(reloaded.size()));
     }
 
-    // --- Case 4: textured corpus, so ORB is actually exercised -----------
-    // Kept in its own library so the assertions above stay hermetic.
     const QString tlib = base + QStringLiteral("/textured_library");
     QDir().mkpath(tlib);
 
@@ -342,8 +302,7 @@ int runSelfTest()
     sceneC().save(tlib + QStringLiteral("/distractC.png"), "PNG");
 
     core::ImageIndex tindex;
-    QString qTex;  // filled when the textured index builds below; needed again
-                   // by the default-threshold case, so it lives at this scope
+    QString qTex;
     if (!tindex.build(tlib)) {
         std::printf("FAIL: could not build textured index\n");
         ++failures;
@@ -359,10 +318,6 @@ int runSelfTest()
             std::printf("Case 4 — textured corpus (ORB live):\n");
             printResults(r4);
 
-            // A byte-identical copy can only reach 1.0 when all three signals
-            // fire. With ORB contributing 0.0 the score tops out at
-            // 0.8 * 0.65 + 0.2 = 0.72, so this is a direct guard against the
-            // keypoint path regressing to a silent no-op.
             if (r4.size() < 2 || r4[0].score < 0.99 || r4[1].score < 0.99) {
                 std::printf("FAIL: exact copies scored %.3f/%.3f, expected ~1.0 "
                             "(ORB likely not contributing)\n\n",
@@ -374,7 +329,6 @@ int runSelfTest()
                             r4[0].score);
             }
 
-            // The graded edit must outrank every flat distractor.
             const int rankGraded = rankOf(r4, QStringLiteral("graded.png"));
             const int rankA = rankOf(r4, QStringLiteral("distractA.png"));
             const int rankB = rankOf(r4, QStringLiteral("distractB.png"));
@@ -393,13 +347,6 @@ int runSelfTest()
         }
     }
 
-    // --- Case 5: pHash stability under exposure change -------------------
-    // Brightness is the DC coefficient of the DCT, so exposure is the change
-    // pHash handles worst and the one this tool most needs to survive. Guard
-    // the property directly. Note that the DC term is deliberately left in the
-    // median: measured against an AC-only median it is worth about three points
-    // of stability here while costing almost no discrimination, so removing it
-    // would be a regression.
     {
         const uint64_t hp0 = core::computePHash(tex);
         const uint64_t hpBright = core::computePHash(exposureShift(tex, 1.35, -30.0));
@@ -420,11 +367,6 @@ int runSelfTest()
         }
     }
 
-    // --- Case 6: update-checker version comparison -------------------------
-    // The failure mode that matters here is a false positive, not a missed
-    // update: a tag the parser cannot make sense of must resolve to "say
-    // nothing", because the cost of the opposite reading is every user being
-    // told to update on every launch, forever, with no way to tell.
     {
         struct VersionCase {
             const char *candidate;
@@ -436,26 +378,24 @@ int runSelfTest()
             {"1.2.0", "1.1.0", true},
             {"v1.1.1", "1.1.0", true},
             {"v2.0.0", "1.99.99", true},
-            {"v1.2", "1.1.9", true},     // short form
-            {"v2", "1.99.99", true},      // major only
-            {"v1.1.0", "1.1.0", false},   // equal
-            {"v1.1.0", "v1.1.0", false},  // equal, both tagged
-            {"v1.0.9", "1.1.0", false},   // older
+            {"v1.2", "1.1.9", true},
+            {"v2", "1.99.99", true},
+            {"v1.1.0", "1.1.0", false},
+            {"v1.1.0", "v1.1.0", false},
+            {"v1.0.9", "1.1.0", false},
             {"v0.9.9", "1.0.0", false},
-            // A release outranks its own prerelease.
             {"v1.2.0", "1.2.0-rc1", true},
             {"v1.2.0-rc1", "1.2.0", false},
-            {"v1.2.0+build7", "1.2.0", false},  // metadata is not precedence
-            {"v1.2.0-rc1", "1.2.0-rc2", false}, // two prereleases: do not guess
-            // Everything below must be read as "unknown", i.e. silent.
+            {"v1.2.0+build7", "1.2.0", false},
+            {"v1.2.0-rc1", "1.2.0-rc2", false},
             {"", "1.1.0", false},
             {"v1.1.0", "", false},
             {"nightly", "1.1.0", false},
             {"v1.2.x", "1.1.0", false},
-            {"v1.2.3.4", "1.1.0", false},         // four components
-            {"v1.2.", "1.1.0", false},             // trailing dot
-            {"v2024.01.15", "1.1.0", false},      // date tag: leading zero
-            {"v99999999999999999999", "1.1.0", false},  // overflows qint64
+            {"v1.2.3.4", "1.1.0", false},
+            {"v1.2.", "1.1.0", false},
+            {"v2024.01.15", "1.1.0", false},
+            {"v99999999999999999999", "1.1.0", false},
         };
 
         std::printf("Case 6 — update version comparison:\n");
@@ -478,8 +418,6 @@ int runSelfTest()
                         sizeof(cases) / sizeof(cases[0]));
         }
 
-        // The tag is normalised on both sides, so "v1.2.0" and " 1.2.0 " are the
-        // same version and do not nag each other.
         if (app::normaliseVersion(QStringLiteral("v1.2.0")) !=
                 QStringLiteral("1.2.0") ||
             app::normaliseVersion(QStringLiteral("  V1.2.0 ")) !=
@@ -489,10 +427,6 @@ int runSelfTest()
         }
     }
 
-    // --- Case 7: release payload parsing ------------------------------------
-    // The self-test is a second caller of this parser besides the real
-    // endpoint, so it has to hold the same line: anything not understood is a
-    // refusal, never a guess.
     {
         const QByteArray good =
             R"({"tag_name":"v1.2.0","name":"1.2.0",)"
@@ -520,14 +454,14 @@ int runSelfTest()
         }
 
         const QByteArray bad[] = {
-            QByteArrayLiteral(""),                       // empty
-            QByteArrayLiteral("{"),                      // truncated
-            QByteArrayLiteral("[]"),                     // array, not object
+            QByteArrayLiteral(""),
+            QByteArrayLiteral("{"),
+            QByteArrayLiteral("[]"),
             QByteArrayLiteral("not json at all"),
-            QByteArrayLiteral("<html><body>503</body></html>"),  // error page, 200
-            R"({"html_url":"https://example.com","body":"x"})",  // no tag
-            R"({"tag_name":"","html_url":"https://example.com"})",  // empty tag
-            R"({"tag_name":"v1.2.0"})",                  // nowhere to send the user
+            QByteArrayLiteral("<html><body>503</body></html>"),
+            R"({"html_url":"https://example.com","body":"x"})",
+            R"({"tag_name":"","html_url":"https://example.com"})",
+            R"({"tag_name":"v1.2.0"})",
             R"({"tag_name":"v1.2.0","html_url":"https://x/","draft":true})",
             R"({"tag_name":"v1.2.0","html_url":"https://x/","prerelease":true})",
         };
@@ -551,10 +485,6 @@ int runSelfTest()
         }
     }
 
-    // --- Case 8: opt-out, mute and throttle persistence ---------------------
-    // Redirected to a scratch directory first: the default Windows format is the
-    // registry, which cannot be redirected this way, and the self-test has no
-    // business writing to a real user's settings on any platform.
     {
         const QString scratch = base + QStringLiteral("/settings");
         QDir().mkpath(scratch);
@@ -574,14 +504,11 @@ int runSelfTest()
         require(!s.isDisabled(), "checks should be on by default");
         require(s.shouldCheckNow(), "a never-checked install should check");
 
-        // The opt-out is read before anything touches the network.
         s.setDisabled(true);
         require(s.isDisabled(), "opt-out did not persist");
         require(!s.shouldCheckNow(), "opt-out did not stop the check");
         s.setDisabled(false);
 
-        // The throttle is on attempts, so a recorded attempt blocks the next
-        // one whatever its outcome was.
         s.setLastCheck(QDateTime::currentDateTimeUtc());
         require(!s.shouldCheckNow(), "throttle did not engage");
         s.setLastCheck(QDateTime::currentDateTimeUtc().addSecs(-25 * 3600));
@@ -589,8 +516,6 @@ int runSelfTest()
         s.setLastCheck(QDateTime());
         require(s.shouldCheckNow(), "clearing the timestamp did not re-enable");
 
-        // The mute is stored normalised, so it survives the tag being written
-        // either way round, and is per-version so a later release still talks.
         s.setIgnoredVersion(QStringLiteral("v1.2.0"));
         require(s.ignoredVersion() == QStringLiteral("1.2.0"),
                 "the muted version was not normalised");
@@ -606,15 +531,6 @@ int runSelfTest()
         }
     }
 
-    // --- Case 9: default-threshold recall --------------------------------
-    // Every search above ran at threshold 0.0, which validates *ranking* but
-    // not that the shipped default of 50% surfaces the tool's reason for
-    // existing. A variant that ranked first but scored below 0.5 would be a
-    // silent miss for every user who leaves the spinner alone. The graded edit
-    // on the textured corpus is the realistic case (SSIM and ORB both live).
-    // The smooth corpus's 70-degree hue rotation is deliberately not asserted:
-    // a hue shift that large genuinely moves luma, and the tool is allowed to
-    // rank it below the default threshold without someone having to file a bug.
     if (!tindex.empty() && !qTex.isEmpty()) {
         std::vector<core::SearchResult> r9;
         if (!tindex.searchFile(qTex, 0.5, r9)) {
@@ -648,18 +564,11 @@ int runSelfTest()
         }
     }
 
-    // --- Case 10: index entries can be dropped on delete -----------------
-    // The trash button removes the file and then has to drop its entry, or the
-    // deleted image keeps matching searches. The part worth testing is that the
-    // removal matches on relPath and that it cannot silently do nothing: an
-    // index whose removeEntry always returned false would look correct right up
-    // until a deleted photo kept coming back as a result.
     std::printf("Case 10 — index entries removed on delete:\n");
     {
         const QString libdir = base + QStringLiteral("/deletelib");
         QDir().mkpath(libdir);
 
-        // Three files, so a removal has to target one entry and leave the rest.
         for (const char *name : {"alpha.png", "beta.png", "gamma.png"}) {
             QImage img(24, 24, QImage::Format_RGB32);
             img.fill(Qt::white);
@@ -673,7 +582,6 @@ int runSelfTest()
                         size_t(victim.size()));
             ++failures;
         } else {
-            // Exactly one entry goes, and the surviving count proves it.
             const bool removed = victim.removeEntry(QStringLiteral("beta.png"));
             const size_t after = victim.size();
             if (!removed) {
@@ -687,9 +595,6 @@ int runSelfTest()
                 std::printf("PASS: one entry removed, two left\n");
             }
 
-            // Removing again must report honestly rather than returning true and
-            // decrementing something else. A delete button pressed twice, or on
-            // a stale grid row, lands exactly here.
             if (victim.removeEntry(QStringLiteral("beta.png"))) {
                 std::printf("FAIL: removing the same entry twice claimed "
                             "success\n\n");
@@ -698,9 +603,6 @@ int runSelfTest()
                 std::printf("PASS: second removal of the same entry refused\n");
             }
 
-            // A path that was never indexed, including the absolute spelling of
-            // one that was. removeEntry is keyed on relPath, so handing it an
-            // absolute path must not remove a different entry by coincidence.
             if (victim.removeEntry(libdir + QStringLiteral("/gamma.png"))) {
                 std::printf("FAIL: an absolute path matched a relative key\n\n");
                 ++failures;
@@ -711,8 +613,6 @@ int runSelfTest()
                 std::printf("PASS: absolute path and unknown key both refused\n");
             }
 
-            // The remaining two must still be searchable, i.e. intact rather
-            // than merely counted.
             const QString survivor = libdir + QStringLiteral("/alpha.png");
             std::vector<core::SearchResult> found;
             if (!victim.searchFile(survivor, 0.0, found) || found.empty() ||
@@ -726,19 +626,6 @@ int runSelfTest()
         }
     }
 
-    // --- Case 11: cache integrity on load, and atomicity on save ---------
-    // The round-trip above proves a good cache survives. These are the two
-    // directions that protect a real library.
-    //
-    // On load: a cache damaged by an interrupted write has to be refused
-    // outright, so the caller reindexes instead of searching hashes that were
-    // never fully written. Believing a damaged header is how a corrupt cache
-    // becomes a wrong result rather than a slow one.
-    //
-    // On save: the cache is replaced atomically, so an interrupted or failing
-    // write leaves the previous one intact and no partial file behind. Getting
-    // this wrong is expensive in exactly the case that matters, since the file
-    // being rewritten is a whole-filesystem index that took hours to build.
     std::printf("Case 11 — damaged caches refused, saves are atomic:\n");
     {
         const QString good = base + QStringLiteral("/index.bin");
@@ -750,7 +637,6 @@ int runSelfTest()
             const QByteArray bytes = src.readAll();
             src.close();
 
-            // Truncated mid-entry: the declared count outruns the bytes left.
             const QString cut = base + QStringLiteral("/truncated.bin");
             QFile out(cut);
             if (out.open(QIODevice::WriteOnly)) {
@@ -766,7 +652,6 @@ int runSelfTest()
                 std::printf("PASS: truncated cache refused, index left empty\n");
             }
 
-            // Wrong magic, so the header check has to catch it.
             const QString junk = base + QStringLiteral("/junk.bin");
             QFile out2(junk);
             if (out2.open(QIODevice::WriteOnly)) {
@@ -782,9 +667,6 @@ int runSelfTest()
             }
         }
 
-        // Atomic replace. Saved into a directory of its own so the file count
-        // afterwards is exact and a leftover temp file cannot hide among the
-        // rest of the corpus.
         const QString adir = base + QStringLiteral("/atomic");
         QDir().mkpath(adir);
         const QString apath = adir + QStringLiteral("/cache.bin");
@@ -798,8 +680,6 @@ int runSelfTest()
                 std::printf("FAIL: first atomic save reported failure\n\n");
                 ++failures;
             } else {
-                // A second, different index over the same path must fully
-                // replace the first rather than blending into it.
                 core::ImageIndex second;
                 if (!second.build(tlib)) {
                     std::printf("FAIL: could not build the second index\n\n");
@@ -825,8 +705,6 @@ int runSelfTest()
                 }
             }
 
-            // Exactly one file: the cache itself. A non-committed write would
-            // leave a sibling temp file behind, growing on every failed save.
             const QStringList left =
                 QDir(adir).entryList(QDir::Files | QDir::Hidden | QDir::System);
             if (left.size() != 1) {
@@ -838,8 +716,6 @@ int runSelfTest()
                 std::printf("PASS: no temp file left behind\n");
             }
 
-            // A save that cannot even open its target must fail cleanly and
-            // leave the existing cache alone.
             core::ImageIndex keep;
             const bool keptBefore = keep.load(apath) && !keep.empty();
             const bool badSave =

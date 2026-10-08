@@ -28,7 +28,6 @@ uint64_t fnv1a64(const char* data, size_t len, uint64_t hash)
     return hash;
 }
 
-// Orthonormal DCT-II cosine table, row-major [u * N + x].
 const std::vector<double>& cosTable()
 {
     static const std::vector<double> table = [] {
@@ -78,7 +77,7 @@ QImage toGrayScaled(const QImage& image, int w, int h)
         .scaled(w, h, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
 }
 
-} // namespace
+}
 
 uint64_t fileHash(const QString& path)
 {
@@ -111,19 +110,11 @@ uint64_t computePHash(const QImage& image)
     double dct[kDctN * kDctN];
     dct2(px, dct);
 
-    // Low-frequency 8x8 block, laid out so index 0 is the DC term.
     double coeffs[kHashSide * kHashSide];
     for (int y = 0; y < kHashSide; ++y)
         for (int x = 0; x < kHashSide; ++x)
             coeffs[y * kHashSide + x] = dct[y * kDctN + x];
 
-    // The DC term is deliberately kept in the median. It is the mean
-    // brightness, so folding it in pulls the threshold up and makes the hash
-    // markedly steadier under the exposure and contrast shifts this tool
-    // exists to ignore. Measured against an AC-only median it is worth roughly
-    // three points of stability under an exposure change while costing only
-    // ~0.003 of discrimination between unrelated images, which is the right way
-    // round for this workload. See the pHash case in --selftest.
     double sorted[kHashSide * kHashSide];
     std::copy(std::begin(coeffs), std::end(coeffs), sorted);
     std::sort(sorted, sorted + kHashSide * kHashSide);
@@ -160,7 +151,6 @@ std::array<uint8_t, kHistBins> computeHist(const QImage& image)
 
     const QImage img = image.convertToFormat(QImage::Format_RGB888);
 
-    // Stride-sample very large images for speed.
     const qint64 totalPixels = qint64(img.width()) * img.height();
     const int stride = totalPixels > 500000
         ? int(std::sqrt(double(totalPixels) / 500000.0)) + 1
@@ -173,7 +163,7 @@ std::array<uint8_t, kHistBins> computeHist(const QImage& image)
         const uchar* line = img.constScanLine(y);
         for (int x = 0; x < img.width(); x += stride) {
             const QColor c(line[x * 3], line[x * 3 + 1], line[x * 3 + 2]);
-            const int h = c.hue(); // -1 when achromatic
+            const int h = c.hue();
             const int s = c.saturation();
             const int hBin = h < 0 ? 0 : std::min(15, h * 16 / 360);
             const int sBin = std::min(15, s * 16 / 256);
@@ -230,8 +220,6 @@ bool extractFeatures(const QString& path, Features& out, QImage* loadedImage)
 double hammingSimilarity(uint64_t a, uint64_t b)
 {
     const uint64_t x = a ^ b;
-    // count() returns size_t; the value is bounded by the bit width, so the
-    // narrowing is exact. MSVC still warns without the cast (C4267).
     const int dist = static_cast<int>(std::bitset<64>(x).count());
     return 1.0 - double(dist) / 64.0;
 }
@@ -253,7 +241,7 @@ bool isExactMatch(const Features& a, const Features& b)
 bool isStale(const Features& f, const QString& path)
 {
     if (f.size < 0)
-        return false; // no recorded state, nothing to compare against
+        return false;
     const QFileInfo info(path);
     if (!info.exists())
         return true;
@@ -270,4 +258,4 @@ double prefilterScore(const Features& query, const Features& entry)
         + 0.10 * histIntersection(query.hist, entry.hist);
 }
 
-} // namespace core
+}

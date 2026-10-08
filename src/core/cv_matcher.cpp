@@ -20,9 +20,6 @@ cv::Mat toMat(const QImage &image) {
       .clone();
 }
 
-// Compare two grayscale images by luminance, contrast, and spatial structure.
-// Blind to color grading, tinting, and hue shifts, which is what lets a raw
-// photo and its graded edit still match.
 double computeSSIM(const cv::Mat &gray1, const cv::Mat &gray2) {
   cv::Mat g1, g2;
   gray1.convertTo(g1, CV_64F);
@@ -48,8 +45,8 @@ double computeSSIM(const cv::Mat &gray1, const cv::Mat &gray2) {
   cv::GaussianBlur(g1_g2, sigma12, cv::Size(11, 11), 1.5);
   sigma12 -= mu1_mu2;
 
-  const double C1 = 6.5025;   // (0.01 * 255)^2
-  const double C2 = 58.5225;  // (0.03 * 255)^2
+  const double C1 = 6.5025;
+  const double C2 = 58.5225;
 
   cv::Mat numerator = (2.0 * mu1_mu2 + C1).mul(2.0 * sigma12 + C2);
   cv::Mat denominator = (mu1_sq + mu2_sq + C1).mul(sigma1_sq + sigma2_sq + C2);
@@ -61,9 +58,6 @@ double computeSSIM(const cv::Mat &gray1, const cv::Mat &gray2) {
   return std::max(0.0, mean_ssim[0]);
 }
 
-// ORB works on intensity gradients, so it survives color grading and still
-// matches images that were cropped or slightly rotated. Lowe's ratio test
-// discards ambiguous matches that would otherwise inflate the score.
 double orbSimilarity(const std::vector<cv::KeyPoint> &k1, const cv::Mat &d1,
                      const std::vector<cv::KeyPoint> &k2, const cv::Mat &d2) {
   if (d1.empty() || d2.empty())
@@ -89,7 +83,7 @@ double orbSimilarity(const std::vector<cv::KeyPoint> &k1, const cv::Mat &d1,
   return std::min(1.0, (double(good_matches) / double(min_kpts)) * 4.0);
 }
 
-} // namespace
+}
 
 CvMatcher::CvMatcher() : orb_(cv::ORB::create(kMaxKeypoints)) {}
 
@@ -100,8 +94,6 @@ CvMatcher::Prepared CvMatcher::prepare(const QImage &image) {
   if (image.isNull())
     return p;
 
-  // Resize to a common size so SSIM and histograms stay comparable regardless
-  // of the resolution difference between an original and its edited version.
   cv::Mat resized;
   cv::resize(toMat(image), resized, cv::Size(kCompareSide, kCompareSide), 0, 0,
              cv::INTER_AREA);
@@ -133,21 +125,10 @@ double CvMatcher::match(const Prepared &a, const Prepared &b) const {
   const double orb = orbSimilarity(a.keypoints, a.descriptors, b.keypoints,
                                    b.descriptors);
 
-  // When neither image yields a single keypoint, ORB did not run: its share is
-  // silence, not evidence of dissimilarity. Scoring it as 0.0 caps a
-  // byte-identical pair of smooth images at 0.72 (0.8 * 0.65 + 0.2) while the
-  // same pair with texture reaches 1.0, so the user's threshold would mean
-  // different things on different libraries. Renormalise the two signals that
-  // actually ran onto the full range in that case. The prefilter always has a
-  // keypoint-free parallel: pHash/dHash are gradient-free on such images too,
-  // so there is no hidden keypoint term to double-count.
   if (a.keypoints.empty() && b.keypoints.empty())
     return (0.45 * ssim + 0.20 * hist) / 0.65;
 
-  // 45% SSIM (color-blind structural comparison, catches edited versions)
-  // 35% ORB  (keypoint matching, catches crops and rotations)
-  // 20% color histogram (pixel color distribution, boosts exact matches)
   return 0.45 * ssim + 0.35 * orb + 0.20 * hist;
 }
 
-} // namespace core
+}

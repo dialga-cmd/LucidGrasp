@@ -1,5 +1,3 @@
-# Debian/Ubuntu Packaging Script
-# This script generates the control file for the .deb package.
 
 PACKAGE_NAME="lucidgrasp"
 VERSION="1.2.3"
