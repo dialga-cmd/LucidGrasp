@@ -58,7 +58,6 @@ public:
     ~UpdateChecker() override;
 
     static QString currentVersion();
-    static QString releasesPageUrl();
 
     void checkOnStartup();
 
@@ -67,6 +66,7 @@ public:
     bool isChecking() const;
     bool isDisabled() const;
     void setDisabled(bool disabled);
+    void setIgnoredVersion(const QString& tag);
 
 signals:
     void updateAvailable(const QString& tag, const QString& url, const QString& notes);

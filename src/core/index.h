@@ -40,6 +40,7 @@ public:
   bool load(const QString &filePath);
 
   static constexpr size_t kMinShortlist = 256;
+  static constexpr size_t kMaxShortlist = 2048;
 
   std::vector<SearchResult> search(const Features &query, const QImage &queryImage,
                                    double threshold,

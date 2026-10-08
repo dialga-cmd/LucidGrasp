@@ -335,10 +335,14 @@ std::vector<SearchResult> ImageIndex::search(const Features &query,
   std::vector<Candidate> exactHits;
   std::vector<Candidate> pool;
   for (size_t i = 0; i < entries_.size(); ++i) {
-    if (progress &&
-        (i % 8192 == 0 || i + 1 == entries_.size()) &&
-        !progress(static_cast<int>(i), static_cast<int>(entries_.size())))
-      return {};
+    if (progress && (i % 8192 == 0 || i + 1 == entries_.size())) {
+      const int cur =
+          i + 1 == entries_.size()
+              ? 50
+              : int(qint64(i) * 50 / entries_.size());
+      if (!progress(cur, 100))
+        return {};
+    }
     const bool exact = isExactMatch(query, entries_[i].features);
     const double p = prefilterScore(query, entries_[i].features);
     if (exact) {
@@ -351,10 +355,17 @@ std::vector<SearchResult> ImageIndex::search(const Features &query,
   const auto stronger = [](const Candidate &a, const Candidate &b) {
     return a.prefilter > b.prefilter;
   };
-  if (pool.size() > kMinShortlist) {
-    std::nth_element(pool.begin(), pool.begin() + kMinShortlist, pool.end(),
+  size_t shortlist = kMinShortlist;
+  const size_t count = entries_.size();
+  if (count > 0) {
+    const size_t scaled = std::min(count / 20, kMaxShortlist);
+    if (scaled > shortlist)
+      shortlist = scaled;
+  }
+  if (pool.size() > shortlist) {
+    std::nth_element(pool.begin(), pool.begin() + shortlist, pool.end(),
                      stronger);
-    pool.resize(kMinShortlist);
+    pool.resize(shortlist);
   }
   std::sort(pool.begin(), pool.end(), stronger);
 
@@ -377,7 +388,9 @@ std::vector<SearchResult> ImageIndex::search(const Features &query,
     if (progress) {
       if (progressTimer.elapsed() >= 50 || done == total - 1) {
         progressTimer.restart();
-        if (!progress(done, total))
+        const int cur =
+            50 + (total > 0 ? int(qint64(done) * 50 / total) : 0);
+        if (!progress(cur, 100))
           return {};
       }
     }
@@ -415,7 +428,7 @@ std::vector<SearchResult> ImageIndex::search(const Features &query,
     ++done;
   }
   if (progress)
-    progress(done, total);
+    progress(100, 100);
 
   std::sort(results.begin(), results.end(),
             [](const SearchResult &a, const SearchResult &b) {

@@ -62,32 +62,6 @@ jobs:
         chmod +x AppDir/AppRun
         APPIMAGE_EXTRACT_AND_RUN=1 ./appimagetool AppDir LucidGrasp-x86_64.AppImage
 
-    - name: Update Scoop Bucket
-      if: github.event_name == 'release'
-      run: |
-        VERSION=${{ github.event.release.tag_name }}
-        REPO=${{ github.repository }}
-        URL="https://github.com/$REPO/releases/download/$VERSION/LucidGrasp_Setup_x64.exe"
-        HASH=$(curl -sL "$URL" | sha256sum | cut -d' ' -f1)
-        cat <<EOF > lucidgrasp.json
-        {
-          "version": "$VERSION",
-          "description": "High-performance image search engine built to identify and match visual media.",
-          "homepage": "https://github.com/$REPO",
-          "url": "$URL",
-          "hash": "$HASH",
-          "moniker": "lucidgrasp"
-        }
-        EOF
-        git config --global user.name "github-actions[bot]"
-        git config --global user.email "github-actions[bot]@users.noreply.github.com"
-        git clone https://x-access-token:${{ secrets.BUCKET_TOKEN }}@github.com/dialga-cmd/lucidgrasp-bucket.git
-        cp lucidgrasp.json lucidgrasp-bucket/
-        cd lucidgrasp-bucket
-        git add lucidgrasp.json
-        git commit -m "Update LucidGrasp to $VERSION"
-        git push
-
     - name: Upload Release Assets
       if: github.event_name == 'release'
       uses: softprops/action-gh-release@v2
@@ -201,4 +175,46 @@ jobs:
       with:
         files: |
           package/LucidGrasp_Setup_x64.exe
+
+  update-scoop:
+    if: github.event_name == 'release'
+    needs: build-windows
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Update Scoop Bucket
+      env:
+        BUCKET_TOKEN: ${{ secrets.BUCKET_TOKEN }}
+      run: |
+        set -eu
+        TAG=${{ github.event.release.tag_name }}
+        VERSION=${TAG#v}
+        REPO=${{ github.repository }}
+        URL="https://github.com/$REPO/releases/download/$TAG/LucidGrasp_Setup_x64.exe"
+        curl -fsSL "$URL" -o setup.exe
+        SIZE=$(stat -c%s setup.exe)
+        test "$SIZE" -gt 1000000
+        HASH=$(sha256sum setup.exe | cut -d' ' -f1)
+        cat <<EOF > lucidgrasp.json
+        {
+          "version": "$VERSION",
+          "description": "High-performance image search engine built to identify and match visual media.",
+          "homepage": "https://github.com/$REPO",
+          "url": "$URL",
+          "hash": "$HASH",
+          "moniker": "lucidgrasp"
+        }
+        EOF
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+        git clone https://x-access-token:$BUCKET_TOKEN@github.com/dialga-cmd/lucidgrasp-bucket.git
+        cp lucidgrasp.json lucidgrasp-bucket/
+        cd lucidgrasp-bucket
+        git add lucidgrasp.json
+        git commit -m "Update LucidGrasp to $VERSION"
+        git push
 

@@ -15,7 +15,7 @@
 
 LucidGrasp is a high performance image search engine built to identify and match visual media. It operates by breaking down images at the pixel level, analyzing their structural patterns, color distributions, and keypoint features to produce a precise similarity percentage between any two images. It is built with C++ and OpenCV for raw speed, and Qt6 for the graphical interface.
 
-LucidGrasp runs on Linux and Windows.
+LucidGrasp runs on Linux, Windows and macOS.
 
 ### Current Capabilities
 
@@ -39,7 +39,7 @@ Color histogram intersection accounts for 20% of the final score. Both images ar
 
 Those three percentages weight the OpenCV comparison against each other. The score a result is finally shown with blends that comparison with the cheap hash ranking from stage one, at 80% to 20%, which is why an indexed file that has since changed on disk is refreshed before it is scored rather than being ranked against hashes for pixels that are no longer there.
 
-Running those three algorithms against every indexed image would make each search slower the more you index, so searching happens in two stages. Every image is first ranked using the perceptual and difference hashes already stored in the index, which is pure in-memory arithmetic and touches no files. Only the top 256 candidates are then decoded and put through the full OpenCV comparison above. Because the expensive half of the work is capped, the time a search spends decoding and comparing images does not grow as the library does, while the top of the ranking stays the same as a full scan would produce. Ranking the shortlist is still a linear pass over the index, but it is arithmetic on data already in memory rather than image decoding, so it stays in the low milliseconds even for a whole-filesystem library.
+Running those three algorithms against every indexed image would make each search slower the more you index, so searching happens in two stages. Every image is first ranked using the perceptual and difference hashes already stored in the index, which is pure in-memory arithmetic and touches no files. The highest-ranked candidates - at least 256, scaling up to a 2048 ceiling as the library grows - are then decoded and put through the full OpenCV comparison above. Because the expensive half of the work is capped, the time a search spends decoding and comparing images does not grow as the library does, while the top of the ranking stays the same as a full scan would produce. Ranking the shortlist is still a linear pass over the index, but it is arithmetic on data already in memory rather than image decoding, so it stays in the low milliseconds even for a whole-filesystem library.
 
 ### Planned Expansion
 

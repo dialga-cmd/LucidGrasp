@@ -200,11 +200,6 @@ QString UpdateChecker::currentVersion()
     return QCoreApplication::applicationVersion();
 }
 
-QString UpdateChecker::releasesPageUrl()
-{
-    return QStringLiteral("https://github.com/" LUCIDGRASP_REPO "/releases");
-}
-
 void UpdateChecker::checkOnStartup()
 {
     if (settings_.shouldCheckNow())
@@ -229,6 +224,11 @@ bool UpdateChecker::isDisabled() const
 void UpdateChecker::setDisabled(bool disabled)
 {
     settings_.setDisabled(disabled);
+}
+
+void UpdateChecker::setIgnoredVersion(const QString& tag)
+{
+    settings_.setIgnoredVersion(tag);
 }
 
 void UpdateChecker::run()

@@ -449,6 +449,8 @@ void MainWindow::showUpdateDialog(const QString &tag, const QString &url,
 
   auto *open = box->addButton(tr("&Open Download Page"), QMessageBox::AcceptRole);
   auto *later = box->addButton(tr("&Not Now"), QMessageBox::RejectRole);
+  auto *ignore =
+      box->addButton(tr("&Ignore This Version"), QMessageBox::ActionRole);
   auto *never =
       box->addButton(tr("Never Check for &Updates"), QMessageBox::DestructiveRole);
   box->setDefaultButton(later);
@@ -460,6 +462,10 @@ void MainWindow::showUpdateDialog(const QString &tag, const QString &url,
     box->accept();
   });
   connect(later, &QAbstractButton::clicked, box, &QDialog::accept);
+  connect(ignore, &QAbstractButton::clicked, box, [this, box, tag] {
+    updates_->setIgnoredVersion(tag);
+    box->accept();
+  });
   connect(never, &QAbstractButton::clicked, box, [this, box] {
     updates_->setDisabled(true);
     autoUpdateAction_->setChecked(false);
@@ -486,6 +492,9 @@ void MainWindow::onUpdateCheckFinished(app::CheckOutcome outcome) {
         tr("LucidGrasp %1 is up to date.")
             .arg(app::UpdateChecker::currentVersion()),
         6000);
+  else if (outcome == app::CheckOutcome::Suppressed)
+    statusBar()->showMessage(
+        tr("The latest version is being ignored."), 6000);
   else
     statusBar()->showMessage(tr("Could not reach GitHub to check for updates."),
                              6000);
@@ -780,8 +789,9 @@ void MainWindow::stopSearch() {
 
 void MainWindow::onSearchProgress(int done, int total) {
   if (total > 0) {
-    progress_->setValue(int(qint64(done) * 100 / total));
-    stats_->setText(QStringLiteral("Searching %1/%2").arg(done).arg(total));
+    const int pct = int(qint64(done) * 100 / total);
+    progress_->setValue(pct);
+    stats_->setText(QStringLiteral("Searching %1%").arg(pct));
   }
 }
 
@@ -801,9 +811,14 @@ void MainWindow::onSearchFinished(bool ok,
     statusBar()->showMessage(QStringLiteral("Search failed"), 4000);
     return;
   }
-  if (!ok || cancel_) {
+  if (cancel_) {
     stats_->setText(QStringLiteral("Search cancelled."));
     statusBar()->showMessage(QStringLiteral("Search cancelled"), 4000);
+    return;
+  }
+  if (!ok) {
+    stats_->setText(QStringLiteral("The query image could not be read."));
+    statusBar()->showMessage(QStringLiteral("Query image unreadable"), 4000);
     return;
   }
   if (results.empty()) {
@@ -921,8 +936,13 @@ void MainWindow::trashResult() {
   const int row = results_->row(item);
   delete results_->takeItem(row);
 
-  statusBar()->showMessage(QStringLiteral("Moved to trash: %1").arg(name),
-                           5000);
+  const bool cached = index_.save(core::defaultIndexPath(libEdit_->text()));
+
+  statusBar()->showMessage(
+      cached ? QStringLiteral("Moved to trash: %1").arg(name)
+             : QStringLiteral("Moved to trash: %1 (index cache not saved)")
+                   .arg(name),
+      5000);
   updateResultActions();
 }
 
@@ -1241,6 +1261,8 @@ void MainWindow::dropEvent(QDropEvent *event) {
   if (urls.isEmpty())
     return;
 
+  QString libraryDir;
+  QString queryImage;
   for (const QUrl &url : urls) {
     if (!url.isLocalFile())
       continue;
@@ -1250,14 +1272,22 @@ void MainWindow::dropEvent(QDropEvent *event) {
       continue;
 
     if (info.isDir()) {
-      libEdit_->setText(path);
-      tryLoadIndex(path);
+      if (libraryDir.isEmpty())
+        libraryDir = path;
     } else if (info.isFile() && core::isSupportedImage(path)) {
-      queryEdit_->setText(path);
-      showPreview(path);
-      updateActions();
+      if (queryImage.isEmpty())
+        queryImage = path;
     }
-    break;
+  }
+
+  if (!libraryDir.isEmpty()) {
+    libEdit_->setText(libraryDir);
+    tryLoadIndex(libraryDir);
+  }
+  if (!queryImage.isEmpty()) {
+    queryEdit_->setText(queryImage);
+    showPreview(queryImage);
+    updateActions();
   }
   event->acceptProposedAction();
 }
