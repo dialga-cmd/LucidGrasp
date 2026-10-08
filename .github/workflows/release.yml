@@ -170,29 +170,30 @@ jobs:
         (Get-Content installer.iss -Raw) -replace '(?m)^AppVersion=[^\r\n]*', "AppVersion=$version" | Set-Content installer.iss -NoNewline
         & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
 
-    - name: Create Chocolatey Package
+    - name: Validate Scoop manifest
+      if: github.event_name == 'pull_request'
       shell: pwsh
       run: |
-        $chocoDir = "choco-pkg"
-        New-Item -ItemType Directory -Path $chocoDir -Force
-        Copy-Item lucidgrasp.nuspec $chocoDir\
-
+        $exe = "package\LucidGrasp_Setup_x64.exe"
+        if (-not (Test-Path $exe)) { throw "Installer not found: $exe" }
         $cache = Get-Content build\CMakeCache.txt
         $match = $cache | Select-String '^CMAKE_PROJECT_VERSION:STATIC=(.+)$'
         if (-not $match) { throw "CMAKE_PROJECT_VERSION not found in CMakeCache.txt" }
         $version = $match.Matches[0].Groups[1].Value
-        (Get-Content "$chocoDir\lucidgrasp.nuspec" -Raw) -replace '<version>[^<]*</version>', "<version>$version</version>" | Set-Content "$chocoDir\lucidgrasp.nuspec" -NoNewline
-
-        New-Item -ItemType Directory -Path "$chocoDir\tools" -Force
-        Copy-Item package\LucidGrasp\LucidGrasp.exe $chocoDir\tools\LucidGrasp_Setup_x64.exe
-
-        Copy-Item package\LucidGrasp_Setup_x64.exe $chocoDir\LucidGrasp_Setup_x64.exe
-
-        cd $chocoDir
-        choco pack
-
-        Move-Item *.nupkg ../package/
-        cd ..
+        $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($hash.Length -ne 64) { throw "Bad SHA256 length: $($hash.Length)" }
+        $manifest = @{
+          version     = "v$version"
+          description = "High-performance image search engine built to identify and match visual media."
+          homepage    = "https://github.com/dialga-cmd/LucidGrasp"
+          url         = "https://github.com/dialga-cmd/LucidGrasp/releases/download/v$version/LucidGrasp_Setup_x64.exe"
+          hash        = $hash
+          moniker     = "lucidgrasp"
+        }
+        $json = $manifest | ConvertTo-Json
+        $parsed = $json | ConvertFrom-Json
+        if ($parsed.hash -ne $hash) { throw "Manifest hash mismatch" }
+        Write-Output "Scoop manifest OK for v${version}: $hash"
 
     - name: Upload Release Asset
       if: github.event_name == 'release'
@@ -200,7 +201,6 @@ jobs:
       with:
         files: |
           package/LucidGrasp_Setup_x64.exe
-          package/*.nupkg
 
   build-macos:
     runs-on: macos-15-intel

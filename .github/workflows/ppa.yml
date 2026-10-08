@@ -3,6 +3,7 @@ name: Publish to Launchpad PPA
 on:
   release:
     types: [published]
+  pull_request:
   workflow_dispatch:
     inputs:
       publish:
@@ -18,7 +19,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: release
+  group: launchpad-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: false
 
 env:
@@ -57,6 +58,7 @@ jobs:
           echo "Building upstream version $ver"
 
       - name: Import signing key
+        if: github.event_name == 'release' || inputs.publish == true
         env:
           GPG_KEY: ${{ secrets.LAUNCHPAD_GPG_KEY }}
         run: |
@@ -74,6 +76,8 @@ jobs:
         env:
           VERSION: ${{ steps.ver.outputs.version }}
           RELEASE_TAG: ${{ github.event.release.tag_name || github.ref_name }}
+          DEBFULLNAME: dialga-cmd
+          DEBEMAIL: adityaraj1234@duck.com
         run: |
           set -eu
           work="$PWD/pkg"
@@ -85,14 +89,15 @@ jobs:
           cd "$work/lucidgrasp-${VERSION}"
           debchange \
             --newversion "${VERSION}-1" \
+            --force-bad-version \
             --distribution noble \
             --force-distribution \
             --urgency medium \
-            --maintainer "dialga-cmd <adityaraj1234@duck.com>" \
             -m "Release ${RELEASE_TAG}"
           dpkg-buildpackage -S -sa -us -uc -d
 
       - name: Sign source package
+        if: github.event_name == 'release' || inputs.publish == true
         env:
           VERSION: ${{ steps.ver.outputs.version }}
         run: |
@@ -110,6 +115,6 @@ jobs:
           dput "$LP_PPA" "lucidgrasp_${VERSION}-1_source.changes"
 
       - name: Dry-run note
-        if: github.event_name == 'workflow_dispatch' && inputs.publish != true
+        if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.publish != true)
         run: |
-          echo "::notice::Dry-run complete - source package built and signed, not uploaded."
+          echo "::notice::Dry-run complete - source package built, not signed or uploaded."

@@ -57,6 +57,7 @@ jobs:
           git archive --format=tar --prefix="LucidGrasp-$sv/" HEAD | gzip -c > "$top/SOURCES/LucidGrasp-$sv.tar.gz"
           cp lucidgrasp.spec "$top/SPECS/"
           rpmbuild -bb \
+            --nodeps \
             --define "_topdir $top" \
             --define "_build_id_links none" \
             "$top/SPECS/lucidgrasp.spec"
@@ -147,10 +148,13 @@ jobs:
           osc ci -m "Bump LucidGrasp to $VERSION ($TAG)"
 
       - name: Trigger OBS service run
-        if: secrets.OBS_TOKEN != ''
         env:
           OBS_TOKEN: ${{ secrets.OBS_TOKEN }}
         run: |
+          if [ -z "${OBS_TOKEN:-}" ]; then
+            echo "OBS_TOKEN secret not set; skipping remote service run"
+            exit 0
+          fi
           curl -sS -X POST \
             -H "Authorization: Token $OBS_TOKEN" \
             "https://api.opensuse.org/trigger/runservice?project=$OBS_PROJECT&package=$OBS_PACKAGE"
