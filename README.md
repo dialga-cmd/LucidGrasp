@@ -4,8 +4,11 @@
   <a href="https://github.com/dialga-cmd/LucidGrasp/releases"><img alt="Release" src="https://img.shields.io/github/v/release/dialga-cmd/LucidGrasp"></a>
   <a href="https://github.com/dialga-cmd/LucidGrasp/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/dialga-cmd/LucidGrasp/total"></a>
   <a href="https://github.com/dialga-cmd/LucidGrasp/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/dialga-cmd/LucidGrasp"></a>
-  <a href="https://github.com/dialga-cmd/LucidGrasp/actions/workflows/release.yml"><img alt="Linux and Windows build" src="https://img.shields.io/github/actions/workflow/status/dialga-cmd/LucidGrasp/release.yml"></a>
-  <a href="https://github.com/dialga-cmd/LucidGrasp/actions/workflows/release-macos.yml"><img alt="macOS build" src="https://img.shields.io/github/actions/workflow/status/dialga-cmd/LucidGrasp/release-macos.yml"></a>
+  <a href="https://github.com/dialga-cmd/LucidGrasp/actions/workflows/release.yml"><img alt="Linux and Windows build" src="https://img.shields.io/github/actions/workflow/status/dialga-cmd/LucidGrasp/release.yml?event=release"></a>
+  <a href="https://github.com/dialga-cmd/LucidGrasp/actions/workflows/release-macos.yml"><img alt="macOS build" src="https://img.shields.io/github/actions/workflow/status/dialga-cmd/LucidGrasp/release-macos.yml?event=release"></a>
+  <a href="https://build.opensuse.org/package/show/home:dialga-cmd/lucidgrasp"><img alt="OBS Tumbleweed" src="https://img.shields.io/obs/home:dialga-cmd/lucidgrasp/openSUSE_Tumbleweed/x86_64?instance=https%3A%2F%2Fapi.opensuse.org&label=OBS%20Tumbleweed"></a>
+  <a href="https://build.opensuse.org/package/show/home:dialga-cmd/lucidgrasp"><img alt="OBS Leap 15.6" src="https://img.shields.io/obs/home:dialga-cmd/lucidgrasp/openSUSE_Leap_15.6/x86_64?instance=https%3A%2F%2Fapi.opensuse.org&label=OBS%20Leap%2015.6"></a>
+  <a href="https://build.opensuse.org/package/show/home:dialga-cmd/lucidgrasp"><img alt="OBS Leap 15.5" src="https://img.shields.io/obs/home:dialga-cmd/lucidgrasp/openSUSE_Leap_15.5/x86_64?instance=https%3A%2F%2Fapi.opensuse.org&label=OBS%20Leap%2015.5"></a>
 </p>
 
 LucidGrasp is a high performance image search engine built to identify and match visual media. It operates by breaking down images at the pixel level, analyzing their structural patterns, color distributions, and keypoint features to produce a precise similarity percentage between any two images. It is built with C++ and OpenCV for raw speed, and Qt6 for the graphical interface.

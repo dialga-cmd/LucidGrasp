@@ -4,15 +4,27 @@ Release:        1
 Summary:        High-performance image search engine
 License:        MIT
 URL:            https://github.com/dialga-cmd/LucidGrasp
-Source0:        %{url}/archive/refs/heads/main.tar.gz
+Source0:        LucidGrasp-%{version}.tar.gz
 
 BuildRequires:  cmake
 BuildRequires:  gcc-c++
 BuildRequires:  make
 %if 0%{?suse_version}
 BuildRequires:  qt6-base-devel
+%if 0%{?sle_version} >= 150600
+BuildRequires:  gcc13-c++
+%define lucidgrasp_cxx g++-13
+%else
+%if 0%{?sle_version} >= 150400
+BuildRequires:  gcc10-c++
+%define lucidgrasp_cxx g++-10
+%else
+%define lucidgrasp_cxx g++
+%endif
+%endif
 %else
 BuildRequires:  qt6-qtbase-devel
+%define lucidgrasp_cxx g++
 %endif
 BuildRequires:  opencv-devel
 Requires:       hicolor-icon-theme
@@ -21,10 +33,10 @@ Requires:       hicolor-icon-theme
 LucidGrasp is a high-performance image search engine built to identify and match visual media.
 
 %prep
-%setup -q -n LucidGrasp-main
+%setup -q -n LucidGrasp-%{version}
 
 %build
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=%{lucidgrasp_cxx}
 cmake --build build -j$(nproc)
 
 %install
@@ -35,6 +47,9 @@ DESTDIR=%{buildroot} cmake --install build --prefix %{_prefix}
 /usr/share/applications/io.github.dialga_cmd.LucidGrasp.desktop
 /usr/share/metainfo/io.github.dialga_cmd.LucidGrasp.metainfo.xml
 /usr/share/icons/hicolor/256x256/apps/io.github.dialga_cmd.LucidGrasp.png
+%dir /usr/share/icons/hicolor
+%dir /usr/share/icons/hicolor/256x256
+%dir /usr/share/icons/hicolor/256x256/apps
 /usr/share/doc/lucidgrasp/LICENSE
 /usr/share/doc/lucidgrasp/README.md
 %dir /usr/share/doc/lucidgrasp

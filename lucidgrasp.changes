@@ -1,0 +1,7 @@
+-------------------------------------------------------------------
+Wed Oct 7 18:00:00 UTC 2026 - dialga-cmd <adityaraj1234@duck.com> - 1.2.3
+- Bump to 1.2.3; install reverse-DNS desktop entry, icon, and AppStream metainfo
+
+-------------------------------------------------------------------
+Tue Oct 6 18:00:00 UTC 2026 - dialga-cmd <adityaraj1234@duck.com> - 1.2.0
+- Initial OBS release
