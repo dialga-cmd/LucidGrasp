@@ -17,7 +17,9 @@ before 1.2.4 is on the [GitHub Releases](https://github.com/dialga-cmd/LucidGras
   all the documents here and will comply with all of them" is ticked, and
   only then turns green. The dialog's close button (**X**) exits LucidGrasp
   entirely instead of skipping the dialog, and the Welcome dialog returns
-  on the next launch until it is agreed.
+  on the next launch until it is agreed. Running
+  `LucidGrasp --reset-legal-agreement` clears the stored agreement so the
+  dialog is shown and must be agreed again.
 - The in-app legal documents now render **full width**: paragraphs are
   re-flowed to the width of the dialog instead of keeping the source
   files' fixed line breaks, so the text runs from the left margin to the

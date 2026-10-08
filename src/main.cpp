@@ -6,6 +6,7 @@
 #include <QCoreApplication>
 #include <QElapsedTimer>
 #include <QFileInfo>
+#include <QSettings>
 #include <QTextStream>
 
 #include "core/index.h"
@@ -27,7 +28,10 @@ void printUsage()
         "  LucidGrasp --cli --reindex <library> <query> [threshold%%]\n"
         "      force a fresh index\n"
         "  LucidGrasp --selftest\n"
-        "      build a synthetic corpus and verify ranking\n");
+        "      build a synthetic corpus and verify ranking\n"
+        "  LucidGrasp --reset-legal-agreement\n"
+        "      clear the stored first-run agreement; the Welcome\n"
+        "      dialog is shown again and must be agreed to enter\n");
 }
 
 int runCli(const QStringList& args)
@@ -159,6 +163,14 @@ int main(int argc, char* argv[])
         || args.contains(QLatin1String("-h"))) {
         printUsage();
         return 0;
+    }
+
+    if (args.contains(QLatin1String("--reset-legal-agreement"))) {
+        QSettings agreement(QSettings::IniFormat, QSettings::UserScope,
+                            QCoreApplication::organizationName(),
+                            QCoreApplication::applicationName());
+        agreement.remove(QStringLiteral("legal/agreed"));
+        agreement.sync();
     }
 
     if (args.contains(QLatin1String("--selftest"))) {
