@@ -817,48 +817,57 @@ void MainWindow::showLegalNoticesDialog() {
 
 void MainWindow::showUpdateDialog(const QString &tag, const QString &url,
                                   const QString &notes) {
-  auto *box = new QMessageBox(this);
-  box->setIcon(QMessageBox::Information);
-  box->setWindowTitle(tr("Update available"));
-  box->setText(tr("LucidGrasp %1 has been released.\nYou are running %2.")
-                   .arg(app::normaliseVersion(tag),
-                        app::UpdateChecker::currentVersion()));
+  auto *dialog = new QDialog(this);
+  dialog->setWindowTitle(tr("Update available"));
+  dialog->setWindowModality(Qt::NonModal);
+  dialog->resize(620, 560);
 
-  if (!notes.isEmpty()) {
-    constexpr int kMaxNotes = 700;
-    QString shown = notes.left(kMaxNotes).trimmed();
-    if (notes.size() > kMaxNotes)
-      shown += QStringLiteral("\n…");
-    box->setInformativeText(shown);
+  auto *layout = new QVBoxLayout(dialog);
+
+  auto *headline = new QLabel(
+      tr("LucidGrasp %1 has been released.\nYou are running %2.")
+          .arg(app::normaliseVersion(tag),
+               app::UpdateChecker::currentVersion()),
+      dialog);
+  headline->setWordWrap(true);
+  layout->addWidget(headline);
+
+  if (!notes.trimmed().isEmpty()) {
+    auto *notesView = new QTextBrowser(dialog);
+    notesView->setOpenExternalLinks(true);
+    notesView->setMarkdown(notes);
+    notesView->setMinimumSize({560, 320});
+    layout->addWidget(notesView, 1);
   }
 
-  auto *open = box->addButton(tr("&Open Download Page"), QMessageBox::AcceptRole);
-  auto *later = box->addButton(tr("&Not Now"), QMessageBox::RejectRole);
-  auto *ignore =
-      box->addButton(tr("&Ignore This Version"), QMessageBox::ActionRole);
-  auto *never =
-      box->addButton(tr("Never Check for &Updates"), QMessageBox::DestructiveRole);
-  box->setDefaultButton(later);
+  auto *buttons = new QDialogButtonBox(dialog);
+  auto *open =
+      buttons->addButton(tr("&Open Download Page"), QDialogButtonBox::AcceptRole);
+  auto *later = buttons->addButton(tr("&Not Now"), QDialogButtonBox::RejectRole);
+  auto *ignore = buttons->addButton(tr("&Ignore This Version"),
+                                    QDialogButtonBox::ActionRole);
+  auto *never = buttons->addButton(tr("Never Check for &Updates"),
+                                   QDialogButtonBox::DestructiveRole);
+  later->setDefault(true);
+  layout->addWidget(buttons);
 
-  box->setWindowModality(Qt::NonModal);
-
-  connect(open, &QAbstractButton::clicked, box, [box, url] {
+  connect(open, &QAbstractButton::clicked, dialog, [dialog, url] {
     QDesktopServices::openUrl(QUrl(url));
-    box->accept();
+    dialog->accept();
   });
-  connect(later, &QAbstractButton::clicked, box, &QDialog::accept);
-  connect(ignore, &QAbstractButton::clicked, box, [this, box, tag] {
+  connect(later, &QAbstractButton::clicked, dialog, &QDialog::accept);
+  connect(ignore, &QAbstractButton::clicked, dialog, [this, dialog, tag] {
     updates_->setIgnoredVersion(tag);
-    box->accept();
+    dialog->accept();
   });
-  connect(never, &QAbstractButton::clicked, box, [this, box] {
+  connect(never, &QAbstractButton::clicked, dialog, [this, dialog] {
     updates_->setDisabled(true);
     autoUpdateAction_->setChecked(false);
-    box->accept();
+    dialog->accept();
   });
-  connect(box, &QDialog::finished, box, &QObject::deleteLater);
+  connect(dialog, &QDialog::finished, dialog, &QObject::deleteLater);
 
-  box->show();
+  dialog->show();
 }
 
 void MainWindow::onUpdateCheckFinished(app::CheckOutcome outcome) {

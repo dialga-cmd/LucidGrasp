@@ -3,6 +3,12 @@
 All notable changes are listed here in reverse chronological order. History
 before 1.2.4 is on the [GitHub Releases](https://github.com/dialga-cmd/LucidGrasp/releases) page.
 
+## [Unreleased]
+
+- The update dialog now shows the **complete release notes** instead of
+  truncating them after 700 characters, and renders them as **Markdown**
+  (headings, lists, links, bold) in a scrollable view.
+
 ## [1.2.5] - 2026-10-08
 
 - Update checks now run every time the application is opened instead of at
