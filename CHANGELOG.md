@@ -12,9 +12,12 @@ before 1.2.4 is on the [GitHub Releases](https://github.com/dialga-cmd/LucidGras
   dialog asks you to read the legal documents: it describes the project,
   links the Privacy Policy and the Legal Notices right from the dialog, and
   notes that the documents are super small, so reading all of them takes
-  only about 10 minutes. The dialog cannot be closed or skipped: **Enter**
-  stays red and disabled until the box "I have read all the documents here
-  and will comply with all of them" is ticked, and only then turns green.
+  only about 10 minutes. The dialog cannot be dismissed to enter the
+  application: **Enter** stays red and disabled until the box "I have read
+  all the documents here and will comply with all of them" is ticked, and
+  only then turns green. The dialog's close button (**X**) exits LucidGrasp
+  entirely instead of skipping the dialog, and the Welcome dialog returns
+  on the next launch until it is agreed.
 - The in-app legal documents now render **full width**: paragraphs are
   re-flowed to the width of the dialog instead of keeping the source
   files' fixed line breaks, so the text runs from the left margin to the

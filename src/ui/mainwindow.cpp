@@ -327,7 +327,10 @@ public:
 
 protected:
   void reject() override {}
-  void closeEvent(QCloseEvent *event) override { event->ignore(); }
+  void closeEvent(QCloseEvent *event) override {
+    event->accept();
+    QCoreApplication::quit();
+  }
 };
 
 QIcon paintThemeGlyph(bool dark, const QColor &colour, int logicalSize) {
@@ -828,7 +831,6 @@ void MainWindow::showWelcomeDialog() {
   auto *dialog = new AgreementDialog(this);
   dialog->setWindowTitle(tr("Welcome"));
   dialog->setWindowModality(Qt::ApplicationModal);
-  dialog->setWindowFlag(Qt::WindowCloseButtonHint, false);
   dialog->setMinimumSize(520, 470);
   dialog->resize(560, 540);
 
@@ -850,7 +852,9 @@ void MainWindow::showWelcomeDialog() {
       "deliberately super small — reading all of them would only take "
       "you about <b>10 minutes</b>. You can open them right here with the "
       "buttons below, or at any later time from the Help menu.</p>"
-      "<p>We hope you enjoy LucidGrasp!</p>"));
+      "<p>We hope you enjoy LucidGrasp! If you are not ready to agree "
+      "yet, close this window to exit — the Welcome dialog will "
+      "return the next time you start the application.</p>"));
   layout->addWidget(intro, 1);
 
   auto *docsRow = new QHBoxLayout;
