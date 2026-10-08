@@ -170,30 +170,6 @@ jobs:
         (Get-Content installer.iss -Raw) -replace '(?m)^AppVersion=[^\r\n]*', "AppVersion=$version" | Set-Content installer.iss -NoNewline
         & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
 
-    - name: Create Chocolatey Package
-      shell: pwsh
-      run: |
-        $chocoDir = "choco-pkg"
-        New-Item -ItemType Directory -Path $chocoDir -Force
-        Copy-Item lucidgrasp.nuspec $chocoDir\
-
-        $cache = Get-Content build\CMakeCache.txt
-        $match = $cache | Select-String '^CMAKE_PROJECT_VERSION:STATIC=(.+)$'
-        if (-not $match) { throw "CMAKE_PROJECT_VERSION not found in CMakeCache.txt" }
-        $version = $match.Matches[0].Groups[1].Value
-        (Get-Content "$chocoDir\lucidgrasp.nuspec" -Raw) -replace '<version>[^<]*</version>', "<version>$version</version>" | Set-Content "$chocoDir\lucidgrasp.nuspec" -NoNewline
-
-        New-Item -ItemType Directory -Path "$chocoDir\tools" -Force
-        Copy-Item package\LucidGrasp\LucidGrasp.exe $chocoDir\tools\LucidGrasp_Setup_x64.exe
-
-        Copy-Item package\LucidGrasp_Setup_x64.exe $chocoDir\LucidGrasp_Setup_x64.exe
-
-        cd $chocoDir
-        choco pack
-
-        Move-Item *.nupkg ../package/
-        cd ..
-
     - name: Validate Scoop manifest
       if: github.event_name == 'pull_request'
       shell: pwsh
@@ -225,7 +201,6 @@ jobs:
       with:
         files: |
           package/LucidGrasp_Setup_x64.exe
-          package/*.nupkg
 
   build-macos:
     runs-on: macos-15-intel
