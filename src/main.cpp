@@ -6,6 +6,7 @@
 #include <QCoreApplication>
 #include <QElapsedTimer>
 #include <QFileInfo>
+#include <QGuiApplication>
 #include <QSettings>
 #include <QTextStream>
 
@@ -187,6 +188,8 @@ int main(int argc, char* argv[])
     QApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
 #endif
     QApplication app(argc, argv);
+    QGuiApplication::setDesktopFileName(
+        QStringLiteral("io.github.dialga_cmd.LucidGrasp"));
     MainWindow window;
     window.resize(1100, 700);
     window.show();

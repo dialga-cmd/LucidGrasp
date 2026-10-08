@@ -24,6 +24,14 @@ before 1.2.4 is on the [GitHub Releases](https://github.com/dialga-cmd/LucidGras
   re-flowed to the width of the dialog instead of keeping the source
   files' fixed line breaks, so the text runs from the left margin to the
   right margin instead of leaving a ragged gap.
+- Fixed the generic fallback icon in the Linux dock: the application now
+  advertises its desktop file name (`io.github.dialga_cmd.LucidGrasp`) so
+  Wayland compositors pair the running window with the correct launcher,
+  and the desktop entry gained `StartupWMClass=LucidGrasp` so X11 docks
+  do the same via WM_CLASS. The app drawer was unaffected; the running
+  window in the dock showed a default settings icon. Debian/PPA, RPM,
+  AppImage and Snap builds all ship the same desktop entry and were all
+  affected.
 
 ## [1.2.5] - 2026-10-08
 
