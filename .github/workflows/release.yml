@@ -194,6 +194,31 @@ jobs:
         Move-Item *.nupkg ../package/
         cd ..
 
+    - name: Validate Scoop manifest
+      if: github.event_name == 'pull_request'
+      shell: pwsh
+      run: |
+        $exe = "package\LucidGrasp_Setup_x64.exe"
+        if (-not (Test-Path $exe)) { throw "Installer not found: $exe" }
+        $cache = Get-Content build\CMakeCache.txt
+        $match = $cache | Select-String '^CMAKE_PROJECT_VERSION:STATIC=(.+)$'
+        if (-not $match) { throw "CMAKE_PROJECT_VERSION not found in CMakeCache.txt" }
+        $version = $match.Matches[0].Groups[1].Value
+        $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($hash.Length -ne 64) { throw "Bad SHA256 length: $($hash.Length)" }
+        $manifest = @{
+          version     = "v$version"
+          description = "High-performance image search engine built to identify and match visual media."
+          homepage    = "https://github.com/dialga-cmd/LucidGrasp"
+          url         = "https://github.com/dialga-cmd/LucidGrasp/releases/download/v$version/LucidGrasp_Setup_x64.exe"
+          hash        = $hash
+          moniker     = "lucidgrasp"
+        }
+        $json = $manifest | ConvertTo-Json
+        $parsed = $json | ConvertFrom-Json
+        if ($parsed.hash -ne $hash) { throw "Manifest hash mismatch" }
+        Write-Output "Scoop manifest OK for v$version: $hash"
+
     - name: Upload Release Asset
       if: github.event_name == 'release'
       uses: softprops/action-gh-release@v2
