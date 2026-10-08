@@ -40,7 +40,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            devscripts dpkg-dev debhelper make fakeroot dput
+            devscripts dpkg-dev debhelper make fakeroot dput gpg-agent
 
       - name: Derive version
         id: ver
@@ -69,8 +69,13 @@ jobs:
           gpgconf --kill gpg-agent
           keygrip="$(gpg --batch --with-colons --list-secret-keys "$LP_GPG_KEY_ID" \
             | awk -F: '$1 == "fpr" { print $10; exit }')"
+          preset="$(command -v gpg-preset-passphrase)"
+          if [ -z "$preset" ]; then
+            preset="/usr/lib/gnupg2/gpg-preset-passphrase"
+            [ -x "$preset" ] || preset="/usr/lib/gnupg/gpg-preset-passphrase"
+          fi
           printf '%s' "${{ secrets.LAUNCHPAD_GPG_PASSPHRASE }}" \
-            | gpg-preset-passphrase --preset "$keygrip"
+            | "$preset" --preset "$keygrip"
 
       - name: Build source package
         env:

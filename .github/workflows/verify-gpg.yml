@@ -13,6 +13,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install gpg-agent utilities
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gpg-agent
+
       - name: Import signing key
         env:
           GPG_KEY: ${{ secrets.LAUNCHPAD_GPG_KEY }}
@@ -38,7 +43,12 @@ jobs:
           echo "allow-preset-passphrase" >> "$HOME/.gnupg/gpg-agent.conf"
           gpgconf --kill gpg-agent
           keygrip="$(gpg --batch --with-colons --list-secret-keys 516C7A148DFC4221CFD3B3BE43B17F39DD2E30C1 | awk -F: '$1 == "fpr" { print $10; exit }')"
-          printf '%s' "$GPG_PASSPHRASE" | gpg-preset-passphrase --preset "$keygrip"
+          preset="$(command -v gpg-preset-passphrase)"
+          if [ -z "$preset" ]; then
+            preset="/usr/lib/gnupg2/gpg-preset-passphrase"
+            [ -x "$preset" ] || preset="/usr/lib/gnupg/gpg-preset-passphrase"
+          fi
+          printf '%s' "$GPG_PASSPHRASE" | "$preset" --preset "$keygrip"
 
       - name: Sign test file
         run: |
