@@ -52,6 +52,12 @@ DESTDIR=%{buildroot} cmake --install build --prefix %{_prefix}
 %dir /usr/share/icons/hicolor/256x256/apps
 /usr/share/doc/lucidgrasp/LICENSE
 /usr/share/doc/lucidgrasp/README.md
+/usr/share/doc/lucidgrasp/PRIVACY.md
+/usr/share/doc/lucidgrasp/TERMS.md
+/usr/share/doc/lucidgrasp/DISCLAIMER.md
+/usr/share/doc/lucidgrasp/ACCEPTABLE_USE.md
+/usr/share/doc/lucidgrasp/LEGAL.md
+/usr/share/doc/lucidgrasp/CHANGELOG.md
 %dir /usr/share/doc/lucidgrasp
 
 %changelog
