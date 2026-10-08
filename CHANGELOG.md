@@ -8,6 +8,17 @@ before 1.2.4 is on the [GitHub Releases](https://github.com/dialga-cmd/LucidGras
 - The update dialog now shows the **complete release notes** instead of
   truncating them after 700 characters, and renders them as **Markdown**
   (headings, lists, links, bold) in a scrollable view.
+- On first launch — and on every launch until it is accepted — a **Welcome**
+  dialog asks you to read the legal documents: it describes the project,
+  links the Privacy Policy and the Legal Notices right from the dialog, and
+  notes that the documents are super small, so reading all of them takes
+  only about 10 minutes. The dialog cannot be closed or skipped: **Enter**
+  stays red and disabled until the box "I have read all the documents here
+  and will comply with all of them" is ticked, and only then turns green.
+- The in-app legal documents now render **full width**: paragraphs are
+  re-flowed to the width of the dialog instead of keeping the source
+  files' fixed line breaks, so the text runs from the left margin to the
+  right margin instead of leaving a ragged gap.
 
 ## [1.2.5] - 2026-10-08
 

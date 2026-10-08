@@ -84,6 +84,7 @@ private:
     void showAboutDialog();
     void showPrivacyDialog();
     void showLegalNoticesDialog();
+    void showWelcomeDialog();
     void openExternal(const QString& url);
     void openIssuePage(const QString& title, const QString& body);
     void equalizePanelHeights();

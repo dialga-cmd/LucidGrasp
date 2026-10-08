@@ -4,6 +4,8 @@
 
 #include <QAbstractButton>
 #include <QAction>
+#include <QCheckBox>
+#include <QCloseEvent>
 #include <QColor>
 #include <QDesktopServices>
 #include <QDialog>
@@ -34,6 +36,7 @@
 #include <QProgressBar>
 #include <QPushButton>
 #include <QSet>
+#include <QSettings>
 #include <QShowEvent>
 #include <QSpinBox>
 #include <QKeyEvent>
@@ -274,6 +277,58 @@ SECURITY.md (GitHub private vulnerability reporting); everything else goes to
 adityaraj1234@duck.com. This policy supplements, and does not replace, the
 Terms of Use and the Disclaimer.
 )USE";
+
+bool isHeadingLine(const QString &line) {
+  if (line.isEmpty() || line.size() > 44)
+    return false;
+  bool hasLetter = false;
+  for (const QChar c : line) {
+    if (c.isLetter()) {
+      if (!c.isUpper())
+        return false;
+      hasLetter = true;
+    } else if (!c.isSpace() && !c.isDigit() && c != QLatin1Char('-') &&
+               c != QLatin1Char('.')) {
+      return false;
+    }
+  }
+  return hasLetter;
+}
+
+QString reflowLegalText(const QString &text) {
+  QStringList paragraphs;
+  QString paragraph;
+  const QStringList lines = text.split(QLatin1Char('\n'));
+  for (const QString &sourceLine : lines) {
+    const QString line = sourceLine.trimmed();
+    if (line.isEmpty()) {
+      if (!paragraph.isEmpty()) {
+        paragraphs.append(paragraph);
+        paragraph.clear();
+      }
+      continue;
+    }
+    if (!paragraph.isEmpty())
+      paragraph += QLatin1Char(' ');
+    paragraph += line;
+    if (isHeadingLine(line)) {
+      paragraphs.append(paragraph);
+      paragraph.clear();
+    }
+  }
+  if (!paragraph.isEmpty())
+    paragraphs.append(paragraph);
+  return paragraphs.join(QStringLiteral("\n\n"));
+}
+
+class AgreementDialog : public QDialog {
+public:
+  using QDialog::QDialog;
+
+protected:
+  void reject() override {}
+  void closeEvent(QCloseEvent *event) override { event->ignore(); }
+};
 
 QIcon paintThemeGlyph(bool dark, const QColor &colour, int logicalSize) {
   const qreal dpr = qApp->devicePixelRatio();
@@ -611,6 +666,8 @@ MainWindow::MainWindow(QWidget *parent)
   darkMode_ = systemPrefersDark();
   applyTheme();
   updateActions();
+
+  QTimer::singleShot(0, this, &MainWindow::showWelcomeDialog);
 }
 
 MainWindow::~MainWindow() {
@@ -761,6 +818,94 @@ void MainWindow::showAboutDialog() {
                QStringLiteral("adityaraj1234@duck.com")));
 }
 
+void MainWindow::showWelcomeDialog() {
+  QSettings agreement(QSettings::IniFormat, QSettings::UserScope,
+                      QCoreApplication::organizationName(),
+                      QCoreApplication::applicationName());
+  if (agreement.value(QStringLiteral("legal/agreed"), false).toBool())
+    return;
+
+  auto *dialog = new AgreementDialog(this);
+  dialog->setWindowTitle(tr("Welcome"));
+  dialog->setWindowModality(Qt::ApplicationModal);
+  dialog->setWindowFlag(Qt::WindowCloseButtonHint, false);
+  dialog->setMinimumSize(520, 470);
+  dialog->resize(560, 540);
+
+  auto *layout = new QVBoxLayout(dialog);
+
+  auto *intro = new QTextBrowser(dialog);
+  intro->setOpenExternalLinks(true);
+  intro->setFocusPolicy(Qt::NoFocus);
+  intro->setHtml(tr(
+      "<h2>Welcome!</h2>"
+      "<p>Thank you for choosing <b>LucidGrasp</b>. This repository on "
+      "GitHub (<i>dialga-cmd/LucidGrasp</i>) is a free and open-source image "
+      "search engine: it indexes a folder on your own computer and finds "
+      "every visually similar image, entirely on your own machine.</p>"
+      "<p>Before you start, we kindly ask you to read the legal documents "
+      "that govern your use of the software: the <b>Privacy Policy</b>, the "
+      "<b>Terms of Use</b>, the <b>Disclaimer of Warranties and Limitation "
+      "of Liability</b> and the <b>Acceptable Use Policy</b>. They are "
+      "deliberately super small — reading all of them would only take "
+      "you about <b>10 minutes</b>. You can open them right here with the "
+      "buttons below, or at any later time from the Help menu.</p>"
+      "<p>We hope you enjoy LucidGrasp!</p>"));
+  layout->addWidget(intro, 1);
+
+  auto *docsRow = new QHBoxLayout;
+  auto *privacyButton = new QPushButton(tr("View &Privacy Policy..."), dialog);
+  auto *legalButton = new QPushButton(tr("View &Legal Notices..."), dialog);
+  connect(privacyButton, &QPushButton::clicked, this,
+          &MainWindow::showPrivacyDialog);
+  connect(legalButton, &QPushButton::clicked, this,
+          &MainWindow::showLegalNoticesDialog);
+  docsRow->addWidget(privacyButton);
+  docsRow->addWidget(legalButton);
+  docsRow->addStretch(1);
+  layout->addLayout(docsRow);
+
+  auto *agree = new QCheckBox(
+      tr("I have read all the documents here and will comply with all of "
+         "them"),
+      dialog);
+  layout->addWidget(agree);
+
+  auto *enter = new QPushButton(tr("Enter"), dialog);
+  enter->setObjectName(QStringLiteral("agreementEnterBtn"));
+  enter->setMinimumWidth(120);
+  enter->setDefault(true);
+  enter->setEnabled(false);
+  enter->setStyleSheet(QStringLiteral(
+      "QPushButton#agreementEnterBtn { font-weight: 600; padding: 7px 18px; }"
+      "QPushButton#agreementEnterBtn:disabled {"
+      "  background-color: #c62828; border: 1px solid #8e1b1b;"
+      "  color: #ffffff; }"
+      "QPushButton#agreementEnterBtn:enabled {"
+      "  background-color: #2e7d32; border: 1px solid #1b5e20;"
+      "  color: #ffffff; }"
+      "QPushButton#agreementEnterBtn:enabled:hover {"
+      "  background-color: #388e3c; }"
+      "QPushButton#agreementEnterBtn:enabled:pressed {"
+      "  background-color: #1b5e20; }"));
+  connect(agree, &QCheckBox::toggled, enter, &QPushButton::setEnabled);
+  auto *agreeRow = new QHBoxLayout;
+  agreeRow->addStretch(1);
+  agreeRow->addWidget(enter);
+  layout->addLayout(agreeRow);
+
+  connect(enter, &QPushButton::clicked, dialog, [dialog] {
+    QSettings stored(QSettings::IniFormat, QSettings::UserScope,
+                     QCoreApplication::organizationName(),
+                     QCoreApplication::applicationName());
+    stored.setValue(QStringLiteral("legal/agreed"), true);
+    dialog->accept();
+  });
+
+  dialog->exec();
+  dialog->deleteLater();
+}
+
 void MainWindow::showPrivacyDialog() {
   auto *dialog = new QDialog(this);
   dialog->setWindowTitle(tr("Privacy Policy"));
@@ -770,7 +915,7 @@ void MainWindow::showPrivacyDialog() {
   auto *layout = new QVBoxLayout(dialog);
   auto *text = new QTextBrowser(dialog);
   text->setOpenExternalLinks(true);
-  text->setPlainText(QString::fromLatin1(kPrivacyPolicyText));
+  text->setPlainText(reflowLegalText(QString::fromLatin1(kPrivacyPolicyText)));
   layout->addWidget(text);
 
   auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok, dialog);
@@ -792,17 +937,19 @@ void MainWindow::showLegalNoticesDialog() {
 
   auto *terms = new QTextBrowser(dialog);
   terms->setOpenExternalLinks(true);
-  terms->setPlainText(QString::fromLatin1(kTermsText));
+  terms->setPlainText(reflowLegalText(QString::fromLatin1(kTermsText)));
   tabs->addTab(terms, tr("Terms of Use"));
 
   auto *disclaimer = new QTextBrowser(dialog);
   disclaimer->setOpenExternalLinks(true);
-  disclaimer->setPlainText(QString::fromLatin1(kDisclaimerText));
+  disclaimer->setPlainText(
+      reflowLegalText(QString::fromLatin1(kDisclaimerText)));
   tabs->addTab(disclaimer, tr("Warranty & Liability"));
 
   auto *acceptableUse = new QTextBrowser(dialog);
   acceptableUse->setOpenExternalLinks(true);
-  acceptableUse->setPlainText(QString::fromLatin1(kAcceptableUseText));
+  acceptableUse->setPlainText(
+      reflowLegalText(QString::fromLatin1(kAcceptableUseText)));
   tabs->addTab(acceptableUse, tr("Acceptable Use"));
 
   layout->addWidget(tabs);
