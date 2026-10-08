@@ -3,6 +3,7 @@ name: Build macOS Release
 on:
   release:
     types: [published]
+  pull_request:
 
 permissions:
   contents: write
