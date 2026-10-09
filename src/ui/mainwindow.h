@@ -25,6 +25,7 @@ class QListWidget;
 class QListWidgetItem;
 class QPushButton;
 class QProgressBar;
+class QRadioButton;
 class QShowEvent;
 class QSpinBox;
 
@@ -34,6 +35,15 @@ class MainWindow : public QMainWindow {
 public:
     explicit MainWindow(QWidget* parent = nullptr);
     ~MainWindow() override;
+
+    // Search mode selected in the "Search Options" panel. Visual is the
+    // plain feature match; Similar runs the query through background removal
+    // first, using one of the two model variants.
+    enum class SearchMode {
+        Visual,
+        SimilarLite,
+        SimilarGeneral,
+    };
 
 protected:
     void showEvent(QShowEvent* event) override;
@@ -54,6 +64,7 @@ private slots:
     void trashResult();
     void toggleTheme();
     void onUpdateCheckFinished(app::CheckOutcome outcome);
+    void searchModeChanged();
 
 private:
     void tryLoadIndex(const QString& dir);
@@ -94,8 +105,17 @@ private:
     void openIssuePage(const QString& title, const QString& body);
     void equalizePanelHeights();
 
+    SearchMode selectedMode() const;
+    void applyModeButtons(SearchMode mode);
+
     QGroupBox* libGroup_ = nullptr;
     QGroupBox* queryGroup_ = nullptr;
+    QGroupBox* optionsGroup_ = nullptr;
+    QRadioButton* visualRadio_ = nullptr;
+    QRadioButton* similarRadio_ = nullptr;
+    QRadioButton* liteRadio_ = nullptr;
+    QRadioButton* generalRadio_ = nullptr;
+    SearchMode lastAppliedMode_ = SearchMode::Visual;
     QPalette desktopPalette_;
     bool panelsSized_ = false;
     QLineEdit* libEdit_ = nullptr;

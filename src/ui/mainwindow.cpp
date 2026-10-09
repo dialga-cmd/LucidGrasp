@@ -36,6 +36,7 @@
 #include <QPixmap>
 #include <QProgressBar>
 #include <QPushButton>
+#include <QRadioButton>
 #include <QSet>
 #include <QSettings>
 #include <QShowEvent>
@@ -44,6 +45,7 @@
 #include <QStatusBar>
 #include <QStyleHints>
 #include <QTabWidget>
+#include <QTemporaryDir>
 #include <QTextBrowser>
 #include <QTimer>
 #include <QUrl>
@@ -593,6 +595,45 @@ MainWindow::MainWindow(QWidget *parent)
   auto *left = new QVBoxLayout(leftWidget);
   left->setContentsMargins(0, 0, 0, 0);
 
+  optionsGroup_ = new QGroupBox(QStringLiteral("Search Options"), central);
+  optionsGroup_->setObjectName(QStringLiteral("optionsGroup"));
+  auto *optionsLayout = new QVBoxLayout(optionsGroup_);
+
+  visualRadio_ = new QRadioButton(QStringLiteral("Visual Search"), optionsGroup_);
+  visualRadio_->setChecked(true);
+  visualRadio_->setToolTip(
+      QStringLiteral("Match using color, structure and keypoints"));
+  optionsLayout->addWidget(visualRadio_);
+
+  similarRadio_ = new QRadioButton(QStringLiteral("Similar Search"), optionsGroup_);
+  similarRadio_->setToolTip(
+      QStringLiteral("Remove the query background before matching"));
+  optionsLayout->addWidget(similarRadio_);
+
+  auto *modelHost = new QWidget(optionsGroup_);
+  auto *modelLayout = new QVBoxLayout(modelHost);
+  modelLayout->setContentsMargins(18, 0, 0, 0);
+  liteRadio_ = new QRadioButton(QStringLiteral("Lite model search"), modelHost);
+  liteRadio_->setEnabled(false);
+  liteRadio_->setToolTip(ui::modelDisplayName(ui::SearchModel::Lite));
+  generalRadio_ =
+      new QRadioButton(QStringLiteral("General model search"), modelHost);
+  generalRadio_->setEnabled(false);
+  generalRadio_->setToolTip(ui::modelDisplayName(ui::SearchModel::General));
+  modelLayout->addWidget(liteRadio_);
+  modelLayout->addWidget(generalRadio_);
+  optionsLayout->addWidget(modelHost);
+
+  auto *optionsHint =
+      new QLabel(QStringLiteral("Similar search fetches the model on first "
+                                "use when it is missing."),
+                 optionsGroup_);
+  optionsHint->setObjectName(QStringLiteral("modelHintLabel"));
+  optionsHint->setWordWrap(true);
+  optionsLayout->addWidget(optionsHint);
+
+  left->addWidget(optionsGroup_);
+
   libGroup_ = new QGroupBox(QStringLiteral("Library"), central);
   libGroup_->setObjectName(QStringLiteral("libGroup"));
   auto *libLayout = new QVBoxLayout(libGroup_);
@@ -691,6 +732,20 @@ MainWindow::MainWindow(QWidget *parent)
   connect(themeToggleBtn_, &QPushButton::clicked, this,
            &MainWindow::toggleTheme);
 
+  connect(visualRadio_, &QRadioButton::toggled, this,
+           &MainWindow::searchModeChanged);
+  connect(similarRadio_, &QRadioButton::toggled, this,
+           &MainWindow::searchModeChanged);
+  connect(liteRadio_, &QRadioButton::toggled, this,
+           &MainWindow::searchModeChanged);
+  connect(generalRadio_, &QRadioButton::toggled, this,
+           &MainWindow::searchModeChanged);
+  connect(similarRadio_, &QRadioButton::toggled, this,
+           [this](bool on) {
+             liteRadio_->setEnabled(on);
+             generalRadio_->setEnabled(on);
+           });
+
   results_->installEventFilter(this);
 
   updates_ = new app::UpdateChecker(this);
@@ -717,6 +772,61 @@ MainWindow::~MainWindow() {
     searchWorker_.join();
   if (bgWorker_.joinable())
     bgWorker_.join();
+}
+
+MainWindow::SearchMode MainWindow::selectedMode() const {
+  if (liteRadio_->isChecked())
+    return SearchMode::SimilarLite;
+  if (generalRadio_->isChecked())
+    return SearchMode::SimilarGeneral;
+  return SearchMode::Visual;
+}
+
+void MainWindow::applyModeButtons(SearchMode mode) {
+  switch (mode) {
+    case SearchMode::Visual:
+      visualRadio_->setChecked(true);
+      break;
+    case SearchMode::SimilarLite:
+      similarRadio_->setChecked(true);
+      liteRadio_->setChecked(true);
+      break;
+    case SearchMode::SimilarGeneral:
+      similarRadio_->setChecked(true);
+      generalRadio_->setChecked(true);
+      break;
+  }
+}
+
+void MainWindow::searchModeChanged() {
+  auto *radio = qobject_cast<QRadioButton *>(sender());
+  if (!radio || !radio->isChecked())
+    return;
+
+  if (radio == similarRadio_) {
+    if (!liteRadio_->isChecked() && !generalRadio_->isChecked())
+      liteRadio_->setChecked(true);
+    return;
+  }
+
+  const SearchMode mode = selectedMode();
+  if (mode == lastAppliedMode_)
+    return;
+
+  if (mode == SearchMode::Visual) {
+    bgRemover_.unload();
+    lastAppliedMode_ = mode;
+    return;
+  }
+
+  const ui::SearchModel want = mode == SearchMode::SimilarLite
+                                   ? ui::SearchModel::Lite
+                                   : ui::SearchModel::General;
+  if (ui::prepareModelForSearch(want, this)) {
+    lastAppliedMode_ = mode;
+  } else {
+    applyModeButtons(lastAppliedMode_);
+  }
 }
 
 void MainWindow::buildMenus() {
@@ -1447,6 +1557,19 @@ void MainWindow::startSearch() {
     return;
   }
 
+  const SearchMode mode = selectedMode();
+  const ui::SearchModel want = mode == SearchMode::SimilarLite
+                                   ? ui::SearchModel::Lite
+                                   : ui::SearchModel::General;
+  if (mode != SearchMode::Visual &&
+      ui::checkModelStatus(want) != ui::ModelStatus::Ready) {
+    if (!ui::prepareModelForSearch(want, this)) {
+      statusBar()->showMessage(
+          QStringLiteral("Similar search model not ready."), 4000);
+      return;
+    }
+  }
+
   searching_ = true;
   cancel_ = false;
   searchBtn_->setText(QStringLiteral("Stop Search"));
@@ -1455,17 +1578,43 @@ void MainWindow::startSearch() {
   progress_->setValue(0);
   results_->clear();
   setBusy(true);
-  statusBar()->showMessage(QStringLiteral("Searching…"));
+  statusBar()->showMessage(mode == SearchMode::Visual
+                               ? QStringLiteral("Searching…")
+                               : QStringLiteral("Preparing query image…"));
   searchTimer_.start();
 
   const double threshold = thresholdSpin_->value() / 100.0;
-  searchWorker_ = std::thread([this, query, threshold] {
+  searchWorker_ = std::thread([this, query, threshold, mode, want] {
     std::vector<core::SearchResult> results;
     bool ok = false;
     QString error;
+    std::unique_ptr<QTemporaryDir> tempDir;
     try {
+      QString searchQuery = query;
+      if (mode != SearchMode::Visual) {
+        const QString model = ui::modelStorePath(want);
+        if (!bgRemover_.isLoaded() || bgRemover_.modelPath() != model) {
+          QString loadError;
+          if (!bgRemover_.loadModel(model, &loadError))
+            throw std::runtime_error(
+                ("cannot load the model: " + loadError).toStdString());
+        }
+        const QImage source = core::loadImageForBackground(query);
+        if (source.isNull())
+          throw std::runtime_error("the query image could not be read");
+        QImage cutout;
+        QString bgError;
+        if (!bgRemover_.removeBackground(source, &cutout, &bgError))
+          throw std::runtime_error(bgError.toStdString());
+        tempDir = std::make_unique<QTemporaryDir>();
+        if (!tempDir->isValid())
+          throw std::runtime_error("cannot create a temporary folder");
+        searchQuery = tempDir->filePath(QStringLiteral("query_matte.png"));
+        if (!core::matteOf(cutout).save(searchQuery, "PNG"))
+          throw std::runtime_error("cannot cache the query matte");
+      }
       ok = index_.searchFile(
-          query, threshold, results, [this](int done, int total) {
+          searchQuery, threshold, results, [this](int done, int total) {
             QMetaObject::invokeMethod(
                 this, [this, done, total] { onSearchProgress(done, total); },
                 Qt::QueuedConnection);
@@ -1695,6 +1844,8 @@ void MainWindow::updateActions() {
     queryAction_->setEnabled(!busy);
   if (bgAction_)
     bgAction_->setEnabled(!busy);
+  if (optionsGroup_)
+    optionsGroup_->setEnabled(!busy);
 }
 
 bool MainWindow::systemPrefersDark() const {
@@ -1837,6 +1988,20 @@ QSpinBox::up-button { subcontrol-position: top right; }
 QSpinBox::down-button { subcontrol-position: bottom right; }
 QSpinBox::up-button:hover, QSpinBox::down-button:hover { background: @hover; }
 
+QRadioButton {
+    background: transparent; color: @text;
+    spacing: 6px; padding: 2px 0;
+}
+QRadioButton:disabled { color: @muted; }
+QRadioButton::indicator {
+    width: 15px; height: 15px; border-radius: 8px;
+    border: 1px solid @border; background: @field;
+}
+QRadioButton::indicator:hover { border-color: @accent; }
+QRadioButton::indicator:checked { background: @accent; border-color: @accent; }
+
+QLabel#modelHintLabel { color: @muted; font-size: 12px; }
+
 QPushButton {
     background: @field; border: 1px solid @border; border-radius: 6px;
     padding: 6px 14px; color: @text;
@@ -1860,6 +2025,13 @@ QPushButton:disabled { color: @muted; border-color: @border; }
 }
 
 #themeToggleBtn, #revealBtn, #trashBtn { padding: 0; }
+
+#modelOkBtn {
+    background: #2e7d32; color: #ffffff; border: 1px solid #2e7d32;
+    font-weight: 600; padding: 6px 16px; min-width: 76px;
+}
+#modelOkBtn:hover:enabled { background: #28692c; }
+#modelOkBtn:disabled { background: @disabled; color: @muted; border-color: @border; }
 
 QProgressBar {
     background: @field; border: 1px solid @border; border-radius: 6px;

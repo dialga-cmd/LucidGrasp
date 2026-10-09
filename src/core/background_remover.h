@@ -28,6 +28,9 @@ public:
   // Loads the ONNX model from disk. Safe to call again to replace the model.
   bool loadModel(const QString &modelPath, QString *error = nullptr);
 
+  // Releases the loaded model and frees its memory.
+  void unload();
+
   bool isLoaded() const;
   QString modelPath() const;
 

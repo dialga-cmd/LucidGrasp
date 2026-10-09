@@ -76,6 +76,13 @@ BackgroundRemover::BackgroundRemover() = default;
 
 BackgroundRemover::~BackgroundRemover() = default;
 
+void BackgroundRemover::unload()
+{
+  std::lock_guard<std::mutex> lock(mutex_);
+  session_.reset();
+  modelPath_.clear();
+}
+
 bool BackgroundRemover::loadModel(const QString &modelPath, QString *error)
 {
   std::lock_guard<std::mutex> lock(mutex_);
