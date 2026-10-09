@@ -7,9 +7,11 @@
 #include <QElapsedTimer>
 #include <QFileInfo>
 #include <QGuiApplication>
+#include <QImage>
 #include <QSettings>
 #include <QTextStream>
 
+#include "core/background_remover.h"
 #include "core/index.h"
 #include "selftest.h"
 #include "ui/mainwindow.h"
@@ -30,6 +32,9 @@ void printUsage()
         "      force a fresh index\n"
         "  LucidGrasp --selftest\n"
         "      build a synthetic corpus and verify ranking\n"
+        "  LucidGrasp --bg-remove <input> <output> [model.onnx]\n"
+        "      remove the background of an image with an ONNX model;\n"
+        "      the model defaults to the standard model location\n"
         "  LucidGrasp --reset-legal-agreement\n"
         "      clear the stored first-run agreement; the Welcome\n"
         "      dialog is shown again and must be agreed to enter\n");
@@ -147,6 +152,75 @@ int runCli(const QStringList& args)
     return 0;
 }
 
+int runBackgroundRemoval(const QStringList& args)
+{
+    QStringList rest;
+    bool seen = false;
+    for (int i = 0; i < args.size(); ++i) {
+        if (args[i] == QLatin1String("--bg-remove"))
+            seen = true;
+        else if (seen)
+            rest.append(args[i]);
+    }
+
+    if (rest.size() < 2 || rest.size() > 3) {
+        printUsage();
+        return 2;
+    }
+
+    const QString input = rest[0];
+    const QString output = rest[1];
+    QString model =
+        rest.size() == 3 ? rest[2] : core::defaultModelPath();
+    if (model.isEmpty()) {
+        std::fprintf(stderr,
+                     "error: no background model found; run ./fetch-model.sh "
+                     "or pass a model path as the third argument\n");
+        return 1;
+    }
+
+    core::BackgroundRemover remover;
+    QString error;
+    QElapsedTimer timer;
+    timer.start();
+    if (!remover.loadModel(model, &error)) {
+        std::fprintf(stderr, "error: cannot load model: %s\n",
+                     qPrintable(error));
+        return 1;
+    }
+    const qint64 loadMs = timer.elapsed();
+
+    const QImage source(input);
+    if (source.isNull()) {
+        std::fprintf(stderr, "error: cannot read '%s'\n",
+                     qPrintable(input));
+        return 1;
+    }
+
+    timer.restart();
+    QImage cutout;
+    if (!remover.removeBackground(source, &cutout, &error)) {
+        std::fprintf(stderr, "error: %s\n", qPrintable(error));
+        return 1;
+    }
+    const qint64 inferMs = timer.elapsed();
+
+    if (!cutout.save(output, "PNG")) {
+        std::fprintf(stderr, "error: cannot write '%s'\n",
+                     qPrintable(output));
+        return 1;
+    }
+
+    std::printf("model    : %s\n", qPrintable(model));
+    std::printf("input    : %dx%d\n", source.width(), source.height());
+    std::printf("load     : %lld ms, inference %lld ms\n",
+                static_cast<long long>(loadMs),
+                static_cast<long long>(inferMs));
+    std::printf("cutout   : %dx%d saved to %s\n", cutout.width(),
+                cutout.height(), qPrintable(output));
+    return 0;
+}
+
 }
 
 int main(int argc, char* argv[])
@@ -182,6 +256,11 @@ int main(int argc, char* argv[])
     if (args.contains(QLatin1String("--cli"))) {
         QCoreApplication app(argc, argv);
         return runCli(args);
+    }
+
+    if (args.contains(QLatin1String("--bg-remove"))) {
+        QCoreApplication app(argc, argv);
+        return runBackgroundRemoval(args);
     }
 
 #if defined(Q_OS_LINUX)

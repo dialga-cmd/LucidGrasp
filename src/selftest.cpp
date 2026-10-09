@@ -1,9 +1,11 @@
 #include "selftest.h"
 
 #include "app/update_checker.h"
+#include "core/background_remover.h"
 #include "core/features.h"
 #include "core/index.h"
 
+#include <cmath>
 #include <cstdio>
 #include <vector>
 
@@ -723,6 +725,64 @@ int runSelfTest()
             } else {
                 std::printf("PASS: failed save left the existing cache intact\n\n");
             }
+        }
+    }
+
+    std::printf("Case 12 — background-removal preprocessing:\n");
+    {
+        QImage red(64, 48, QImage::Format_RGB32);
+        red.fill(QColor(255, 0, 0));
+        std::vector<float> tensor;
+        if (!core::BackgroundRemover::loadInput(red, 32, &tensor) ||
+            tensor.size() != size_t(3) * 32 * 32) {
+            std::printf("FAIL: tensor sizing for a solid red image\n\n");
+            ++failures;
+        } else {
+            const float mean[3] = {0.485f, 0.456f, 0.406f};
+            const float stdv[3] = {0.229f, 0.224f, 0.225f};
+            const float expect[3] = {
+                (1.0f - mean[0]) / stdv[0],
+                (0.0f - mean[1]) / stdv[1],
+                (0.0f - mean[2]) / stdv[2],
+            };
+            bool match = true;
+            for (int c = 0; c < 3 && match; ++c)
+                for (size_t i = 0; i < size_t(32) * 32; ++i) {
+                    const float got = tensor[c * size_t(32) * 32 + i];
+                    if (std::fabs(got - expect[c]) > 1e-3f) {
+                        match = false;
+                        break;
+                    }
+                }
+            if (!match) {
+                std::printf("FAIL: normalized pixel values wrong\n\n");
+                ++failures;
+            } else {
+                std::printf("PASS: RGB->NCHW normalization matches the "
+                            "BiRefNet convention\n\n");
+            }
+        }
+
+        QImage black(32, 32, QImage::Format_RGB32);
+        black.fill(Qt::black);
+        std::vector<float> t2;
+        if (core::BackgroundRemover::loadInput(black, 32, &t2)) {
+            std::printf("FAIL: a fully black image produced a tensor\n\n");
+            ++failures;
+        } else {
+            std::printf("PASS: a fully black image is rejected\n\n");
+        }
+
+        core::BackgroundRemover remover;
+        QImage cutout;
+        QString noModelError;
+        const bool ranNoModel =
+            remover.removeBackground(red, &cutout, &noModelError);
+        if (ranNoModel) {
+            std::printf("FAIL: inference without a model reported success\n\n");
+            ++failures;
+        } else {
+            std::printf("PASS: inference without a model fails cleanly\n\n");
         }
     }
 

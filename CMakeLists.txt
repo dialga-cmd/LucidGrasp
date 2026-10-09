@@ -5,6 +5,8 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
 find_package(Qt6 REQUIRED COMPONENTS Widgets Network)
 find_package(Threads REQUIRED)
 
@@ -20,6 +22,8 @@ set(SOURCES
     src/selftest.cpp
     src/app/update_checker.h
     src/app/update_checker.cpp
+    src/core/background_remover.h
+    src/core/background_remover.cpp
     src/core/cv_matcher.h
     src/core/cv_matcher.cpp
     src/core/features.h
@@ -30,7 +34,18 @@ set(SOURCES
     src/ui/mainwindow.cpp
     src/ui/file_actions.h
     src/ui/file_actions.cpp
+    src/ui/model_download.h
+    src/ui/model_download.cpp
 )
+
+set(LUCIDGRASP_ONNXRUNTIME_ROOT ""
+    CACHE PATH "Root directory of a prebuilt ONNX Runtime package")
+
+if(NOT LUCIDGRASP_ONNXRUNTIME_ROOT
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/onnxruntime/include/onnxruntime_cxx_api.h")
+    set(LUCIDGRASP_ONNXRUNTIME_ROOT
+        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/onnxruntime")
+endif()
 
 if(WIN32)
     list(APPEND SOURCES lucidgrasp.rc)
@@ -41,7 +56,15 @@ add_executable(LucidGrasp ${SOURCES})
 target_include_directories(LucidGrasp PRIVATE src)
 find_package(OpenCV REQUIRED)
 target_link_libraries(LucidGrasp PRIVATE ${OpenCV_LIBS})
+find_package(ONNXRuntime REQUIRED)
+target_link_libraries(LucidGrasp PRIVATE ONNXRuntime::ONNXRuntime)
 target_link_libraries(LucidGrasp PRIVATE Qt6::Widgets Qt6::Network Threads::Threads)
+
+if(ONNXRUNTIME_LIBRARY)
+    get_filename_component(ONNXRUNTIME_LIB_DIR "${ONNXRUNTIME_LIBRARY}" DIRECTORY)
+    set_target_properties(LucidGrasp PROPERTIES
+        BUILD_RPATH "${ONNXRUNTIME_LIB_DIR}")
+endif()
 
 if(UNIX AND NOT APPLE)
     target_link_libraries(LucidGrasp PRIVATE Qt6::DBus)

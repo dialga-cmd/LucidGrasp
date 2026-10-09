@@ -1,6 +1,7 @@
 #include "ui/mainwindow.h"
 
 #include "ui/file_actions.h"
+#include "ui/model_download.h"
 
 #include <QAbstractButton>
 #include <QAction>
@@ -55,6 +56,41 @@
 namespace {
 
 constexpr qreal kPi = 3.14159265358979323846;
+
+QString imageOpenFilter()
+{
+  QSet<QString> exts;
+  for (const QByteArray &f : QImageReader::supportedImageFormats())
+    exts.insert(QString::fromLatin1(f).toLower());
+  exts << QStringLiteral("png") << QStringLiteral("jpg")
+       << QStringLiteral("jpeg") << QStringLiteral("bmp")
+       << QStringLiteral("webp");
+  const QStringList sorted = exts.values();
+  QStringList patterns;
+  for (const QString &e : sorted)
+    patterns << QStringLiteral("*.%1").arg(e);
+  return QStringLiteral("Images (%1);;All files (*)").arg(patterns.join(QLatin1Char(' ')));
+}
+
+QImage checkerboardUnder(const QImage &cutout, int cell = 10)
+{
+  const QImage base(cutout.width(), cutout.height(), QImage::Format_RGB32);
+  const auto shade = [&](int x, int y) {
+    return ((x / cell) + (y / cell)) % 2 == 0 ? qRgb(190, 190, 190)
+                                              : qRgb(150, 150, 150);
+  };
+  for (int y = 0; y < base.height(); ++y) {
+    QRgb *line = reinterpret_cast<QRgb *>(
+        const_cast<uchar *>(base.constScanLine(y)));
+    for (int x = 0; x < base.width(); ++x)
+      line[x] = shade(x, y);
+  }
+  QImage out = base.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+  QPainter p(&out);
+  p.drawImage(0, 0, cutout.convertToFormat(QImage::Format_ARGB32_Premultiplied));
+  p.end();
+  return out;
+}
 
 const char *kPrivacyPolicyText = R"PRIVACY(
 LucidGrasp Privacy Policy
@@ -679,6 +715,8 @@ MainWindow::~MainWindow() {
     worker_.join();
   if (searchWorker_.joinable())
     searchWorker_.join();
+  if (bgWorker_.joinable())
+    bgWorker_.join();
 }
 
 void MainWindow::buildMenus() {
@@ -726,6 +764,13 @@ void MainWindow::buildMenus() {
     openExternal(QStringLiteral("https://github.com/" LUCIDGRASP_REPO
                                 "/releases/latest"));
   });
+
+  QMenu *tools = bar->addMenu(tr("&Tools"));
+
+  bgAction_ = tools->addAction(tr("Remove &Background…"));
+  bgAction_->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+B")));
+  connect(bgAction_, &QAction::triggered, this,
+          &MainWindow::startBackgroundRemoval);
 
   QMenu *help = bar->addMenu(tr("&Help"));
 
@@ -1262,6 +1307,129 @@ void MainWindow::showPreview(const QString &path) {
       preview_->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
 }
 
+void MainWindow::startBackgroundRemoval() {
+  if (bgBusy_ || indexing_ || searching_)
+    return;
+
+  const QString source =
+      askForFile(QStringLiteral("Select image to cut out"), imageOpenFilter());
+  if (source.isEmpty())
+    return;
+
+  QString model = core::defaultModelPath();
+  if (model.isEmpty())
+    model = ui::ensureBackgroundModel(this);
+  if (model.isEmpty())
+    return;
+
+  bgBusy_ = true;
+  setBusy(true);
+  progress_->setRange(0, 0);
+  statusBar()->showMessage(QStringLiteral("Removing background…"));
+
+  bgWorker_ = std::thread([this, source, model] {
+    QImage cutout;
+    QString error;
+    bool ok = false;
+    try {
+      if (!bgRemover_.isLoaded() || bgRemover_.modelPath() != model)
+        ok = bgRemover_.loadModel(model, &error);
+      if (ok)
+        ok = bgRemover_.removeBackground(QImage(source), &cutout, &error);
+    } catch (const std::exception &e) {
+      ok = false;
+      error = QString::fromUtf8(e.what());
+    } catch (...) {
+      ok = false;
+      error = QStringLiteral("unknown error");
+    }
+
+    QMetaObject::invokeMethod(
+        this,
+        [this, ok, source, error, cutout = std::move(cutout)]() mutable {
+          onBackgroundDone(ok, source, std::move(cutout), error);
+        },
+        Qt::QueuedConnection);
+  });
+}
+
+void MainWindow::onBackgroundDone(bool ok, const QString &sourcePath,
+                                  const QImage &cutout,
+                                  const QString &error) {
+  if (bgWorker_.joinable())
+    bgWorker_.join();
+  bgBusy_ = false;
+  progress_->setRange(0, 100);
+  setBusy(false);
+  statusBar()->clearMessage();
+
+  if (!ok) {
+    const QString detail = error.isEmpty()
+                               ? QStringLiteral("no output was produced")
+                               : error;
+    QMessageBox::warning(this, QStringLiteral("Remove background"),
+                         QStringLiteral("Background removal failed:\n%1")
+                             .arg(detail));
+    return;
+  }
+  showBackgroundResult(sourcePath, cutout);
+}
+
+void MainWindow::showBackgroundResult(const QString &sourcePath,
+                                      const QImage &cutout) {
+  QDialog dialog(this);
+  dialog.setWindowTitle(QStringLiteral("Background removed"));
+  dialog.resize(880, 540);
+
+  auto *outer = new QVBoxLayout(&dialog);
+  auto *content = new QHBoxLayout;
+  outer->addLayout(content);
+
+  const auto makeLabel = [](const QImage &image, int width) {
+    auto *label = new QLabel;
+    label->setAlignment(Qt::AlignCenter);
+    label->setMinimumSize(width, 360);
+    label->setPixmap(QPixmap::fromImage(image).scaled(
+        QSize(width, 360), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    return label;
+  };
+
+  QImageReader reader(sourcePath);
+  reader.setAutoTransform(true);
+  const QImage original = reader.read();
+  content->addWidget(makeLabel(original.isNull() ? cutout : original, 420));
+  content->addWidget(makeLabel(checkerboardUnder(cutout), 420));
+
+  auto *buttons =
+      new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+  QPushButton *saveButton = buttons->addButton(
+      QStringLiteral("Save As…"), QDialogButtonBox::ActionRole);
+  connect(saveButton, &QPushButton::clicked, &dialog, [&] {
+    const QFileInfo info(sourcePath);
+    const QString base = info.completeBaseName();
+    const QString target = QFileDialog::getSaveFileName(
+        &dialog, QStringLiteral("Save cutout"),
+        info.absolutePath() + QLatin1Char('/') + base +
+            QStringLiteral("_cutout.png"),
+        QStringLiteral("PNG image (*.png);;JPEG image (*.jpg *.jpeg)"));
+    if (target.isEmpty())
+      return;
+    const bool jpeg = target.endsWith(QLatin1String(".jpg")) ||
+                      target.endsWith(QLatin1String(".jpeg"));
+    const QImage toSave = jpeg ? checkerboardUnder(cutout) : cutout;
+    if (!toSave.save(target, jpeg ? "JPG" : "PNG")) {
+      QMessageBox::warning(&dialog, QStringLiteral("Save cutout"),
+                           QStringLiteral("Could not write %1.").arg(target));
+      return;
+    }
+    dialog.accept();
+  });
+  connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+  outer->addWidget(buttons);
+
+  dialog.exec();
+}
+
 void MainWindow::startSearch() {
   if (searching_) {
     stopSearch();
@@ -1511,7 +1679,7 @@ void MainWindow::openResult(QListWidgetItem *item) {
 }
 
 void MainWindow::updateActions() {
-  const bool busy = indexing_ || searching_;
+  const bool busy = indexing_ || searching_ || bgBusy_;
   const bool canAct = !busy && currentResult() != nullptr;
   revealBtn_->setEnabled(canAct);
   trashBtn_->setEnabled(canAct);
@@ -1525,6 +1693,8 @@ void MainWindow::updateActions() {
     indexAction_->setEnabled(!busy);
   if (queryAction_)
     queryAction_->setEnabled(!busy);
+  if (bgAction_)
+    bgAction_->setEnabled(!busy);
 }
 
 bool MainWindow::systemPrefersDark() const {
