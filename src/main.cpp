@@ -203,7 +203,7 @@ int runBackgroundRemoval(const QStringList& args)
     if (inputInfo.isDir())
         return runBackgroundBatch(remover, model, loadMs, input, output);
 
-    const QImage source(input);
+    const QImage source = core::loadImageForBackground(input);
     if (source.isNull()) {
         std::fprintf(stderr, "error: cannot read '%s'\n",
                      qPrintable(input));
@@ -282,11 +282,13 @@ int runBackgroundBatch(core::BackgroundRemover& remover, const QString& model,
         timer.restart();
         QImage cutout;
         QString err;
-        const bool ok = remover.removeBackground(QImage(src), &cutout, &err);
+        const bool ok =
+            remover.removeBackground(core::loadImageForBackground(src),
+                                     &cutout, &err);
         const qint64 ms = timer.elapsed();
         if (ok) {
-            const QString base =
-                QFileInfo(rel).completeBaseName() + QStringLiteral(".png");
+            const QString base = QFileInfo(rel).fileName()
+                                 + QStringLiteral("_cutout.png");
             const QString outRel =
                 QFileInfo(rel).path() == QLatin1String(".")
                     ? base

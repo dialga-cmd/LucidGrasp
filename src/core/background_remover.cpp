@@ -14,6 +14,9 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
+#include <QImageReader>
+#include <QImageIOHandler>
+#include <QSize>
 #include <QStandardPaths>
 
 #include <onnxruntime_cxx_api.h>
@@ -272,6 +275,39 @@ bool BackgroundRemover::removeBackground(const QImage &image, QImage *cutout,
       *error = errorMessage(e);
     return false;
   }
+}
+
+QImage loadImageForBackground(const QString &path)
+{
+  QImageReader reader(path);
+  reader.setAutoTransform(true);
+  const QSize size = reader.size();
+  const bool huge =
+      size.isValid() && (size.width() > kBackgroundSourceMaxDim ||
+                         size.height() > kBackgroundSourceMaxDim);
+  if (!huge)
+    return reader.read();
+  const QSize target =
+      size.scaled(kBackgroundSourceMaxDim, kBackgroundSourceMaxDim,
+                  Qt::KeepAspectRatio);
+  if (reader.supportsOption(QImageIOHandler::ScaledSize)) {
+    // JPEG and friends decode directly at the targets size, staying far
+    // below the allocation guard.
+    reader.setScaledSize(target);
+    return reader.read();
+  }
+  // PNG and other handlers without native scaled decoding allocate the full
+  // image first, so the default guard would reject them before any
+  // downscaling; raise the guard for the read and scale toward the target.
+  // The full-size buffer is transient and immediately scaled down.
+  const int previous = QImageReader::allocationLimit();
+  QImageReader::setAllocationLimit(1024);
+  QImageReader full(path);
+  full.setAutoTransform(true);
+  full.setScaledSize(target);
+  QImage image = full.read();
+  QImageReader::setAllocationLimit(previous);
+  return image;
 }
 
 QString modelFileName()

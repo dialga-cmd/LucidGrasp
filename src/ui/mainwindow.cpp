@@ -1336,7 +1336,8 @@ void MainWindow::startBackgroundRemoval() {
       if (!ok)
         ok = bgRemover_.loadModel(model, &error);
       if (ok)
-        ok = bgRemover_.removeBackground(QImage(source), &cutout, &error);
+        ok = bgRemover_.removeBackground(
+            core::loadImageForBackground(source), &cutout, &error);
     } catch (const std::exception &e) {
       ok = false;
       error = QString::fromUtf8(e.what());
@@ -1395,9 +1396,7 @@ void MainWindow::showBackgroundResult(const QString &sourcePath,
     return label;
   };
 
-  QImageReader reader(sourcePath);
-  reader.setAutoTransform(true);
-  const QImage original = reader.read();
+  const QImage original = core::loadImageForBackground(sourcePath);
   content->addWidget(makeLabel(original.isNull() ? cutout : original, 420));
   content->addWidget(makeLabel(checkerboardUnder(cutout), 420));
 

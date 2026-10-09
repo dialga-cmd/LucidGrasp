@@ -51,6 +51,17 @@ private:
   int inputHeight_ = 1024;
 };
 
+// Longest edge preserved when loading a source image; anything bigger is
+// downscaled during decode so it stays far below Qt's default 128 MB
+// allocation guard. The model only ever consumes a fixed-size copy, so this
+// costs no model fidelity; cutouts of oversized sources are capped here.
+constexpr int kBackgroundSourceMaxDim = 4096;
+
+// Loads an image from disk with EXIF orientation applied, downscaling very
+// large sources (e.g. ones PNG handlers cannot decode scaled) to at most
+// kBackgroundSourceMaxDim. Returns a null image when the file cannot be read.
+QImage loadImageForBackground(const QString &path);
+
 // Name of the background model file inside the models directory.
 QString modelFileName();
 
