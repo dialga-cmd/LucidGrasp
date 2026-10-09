@@ -786,6 +786,56 @@ int runSelfTest()
         }
     }
 
+    std::printf("Case 13 — cutout matte compositing:\n");
+    {
+        QImage cutout(2, 2, QImage::Format_ARGB32);
+        cutout.setPixelColor(0, 0, QColor(255, 0, 0, 255));
+        cutout.setPixelColor(1, 0, QColor(0, 255, 0, 128));
+        cutout.setPixelColor(0, 1, QColor(0, 0, 255, 0));
+        cutout.setPixelColor(1, 1, QColor(255, 255, 255, 255));
+
+        const QImage matte = core::matteOf(cutout);
+        int bad = 0;
+        if (matte.isNull() || matte.width() != 2 || matte.height() != 2 ||
+            matte.format() != QImage::Format_RGB888) {
+            std::printf("FAIL: matte size or format\n\n");
+            ++failures;
+        } else {
+            if (matte.pixelColor(0, 0) != QColor(255, 0, 0)) {
+                std::printf("FAIL: opaque pixel lost its color\n");
+                ++bad;
+            }
+            const QColor gray = matte.pixelColor(0, 1);
+            if (gray != QColor(128, 128, 128)) {
+                std::printf("FAIL: transparent pixel did not become gray "
+                            "(got %d,%d,%d)\n",
+                            gray.red(), gray.green(), gray.blue());
+                ++bad;
+            }
+            const QColor blend = matte.pixelColor(1, 0);
+            const int dr = std::abs(blend.red() - 64);
+            const int dg = std::abs(blend.green() - 191);
+            const int db = std::abs(blend.blue() - 64);
+            if (dr > 1 || dg > 1 || db > 1) {
+                std::printf("FAIL: half-transparent pixel not blended "
+                            "(got %d,%d,%d)\n",
+                            blend.red(), blend.green(), blend.blue());
+                ++bad;
+            }
+            if (matte.pixelColor(1, 1) != QColor(255, 255, 255)) {
+                std::printf("FAIL: opaque white changed\n");
+                ++bad;
+            }
+            if (bad == 0) {
+                std::printf("PASS: matte keeps the foreground and flattens "
+                            "the background to gray\n\n");
+            } else {
+                std::printf("\n");
+                ++failures;
+            }
+        }
+    }
+
     if (failures == 0)
         std::printf("\nAll self-tests passed.\n");
     else

@@ -12,10 +12,12 @@
 #include <utility>
 
 #include <QCoreApplication>
+#include <QColor>
 #include <QDir>
 #include <QFileInfo>
 #include <QImageReader>
 #include <QImageIOHandler>
+#include <QPainter>
 #include <QSize>
 #include <QStandardPaths>
 
@@ -308,6 +310,18 @@ QImage loadImageForBackground(const QString &path)
   QImage image = full.read();
   QImageReader::setAllocationLimit(previous);
   return image;
+}
+
+QImage matteOf(const QImage &cutout)
+{
+  if (cutout.isNull())
+    return QImage();
+  QImage canvas(cutout.size(), QImage::Format_ARGB32);
+  canvas.fill(QColor(128, 128, 128));
+  QPainter painter(&canvas);
+  painter.drawImage(0, 0, cutout);
+  painter.end();
+  return canvas.convertToFormat(QImage::Format_RGB888);
 }
 
 QString modelFileName()

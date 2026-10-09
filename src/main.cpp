@@ -13,6 +13,7 @@
 #include <QImageReader>
 #include <QSettings>
 #include <QTextStream>
+#include <QTemporaryDir>
 
 #include "core/background_remover.h"
 #include "core/index.h"
@@ -35,48 +36,35 @@ void printUsage()
         "      force a fresh index\n"
         "  LucidGrasp --selftest\n"
         "      build a synthetic corpus and verify ranking\n"
-        "  LucidGrasp --bg-remove <input> <output> [model.onnx]\n"
+        "  LucidGrasp --bg-remove [--matte] <input> <output> [model.onnx]\n"
         "      remove the background of an image with an ONNX model;\n"
         "      when <input> is a folder every image inside is processed\n"
         "      (recursively) into <output> using one model load;\n"
+        "      --matte composites each cutout onto a flat gray field so\n"
+        "      background pixels cannot leak into search features;\n"
         "      the model defaults to the standard model location\n"
+        "  LucidGrasp --object-search [--reindex] <library> <query> [threshold%%]\n"
+        "      find the same subject regardless of background; <library> must\n"
+        "      be a folder of matte cutouts (see --bg-remove --matte), and the\n"
+        "      query image is stripped of its background automatically\n"
         "  LucidGrasp --reset-legal-agreement\n"
         "      clear the stored first-run agreement; the Welcome\n"
         "      dialog is shown again and must be agreed to enter\n");
 }
 
-int runCli(const QStringList& args)
+bool parseThreshold(const QString& text, double* threshold)
 {
-    bool reindex = false;
-    QStringList rest;
-    for (int i = 2; i < args.size(); ++i) {
-        if (args[i] == QLatin1String("--reindex"))
-            reindex = true;
-        else
-            rest.append(args[i]);
-    }
+    bool parsed = false;
+    const double pct = text.toDouble(&parsed);
+    if (!parsed || pct < 0.0 || pct > 100.0)
+        return false;
+    *threshold = pct / 100.0;
+    return true;
+}
 
-    if (rest.size() < 2 || rest.size() > 3) {
-        printUsage();
-        return 2;
-    }
-
-    const QString library = rest[0];
-    const QString query = rest[1];
-    double threshold = 0.5;
-    if (rest.size() == 3) {
-        bool parsed = false;
-        const double pct = rest[2].toDouble(&parsed);
-        if (!parsed || pct < 0.0 || pct > 100.0) {
-            std::fprintf(stderr,
-                         "error: threshold must be a number from 0 to 100, "
-                         "got '%s'\n",
-                         qPrintable(rest[2]));
-            return 2;
-        }
-        threshold = pct / 100.0;
-    }
-
+int runSimilarSearch(const QString& library, const QString& query,
+                     double threshold, bool reindex)
+{
     core::ImageIndex index;
     QElapsedTimer timer;
     timer.start();
@@ -157,17 +145,48 @@ int runCli(const QStringList& args)
     return 0;
 }
 
+int runCli(const QStringList& args)
+{
+    bool reindex = false;
+    QStringList rest;
+    for (int i = 2; i < args.size(); ++i) {
+        if (args[i] == QLatin1String("--reindex"))
+            reindex = true;
+        else
+            rest.append(args[i]);
+    }
+
+    if (rest.size() < 2 || rest.size() > 3) {
+        printUsage();
+        return 2;
+    }
+
+    double threshold = 0.5;
+    if (rest.size() == 3 && !parseThreshold(rest[2], &threshold)) {
+        std::fprintf(stderr,
+                     "error: threshold must be a number from 0 to 100, "
+                     "got '%s'\n",
+                     qPrintable(rest[2]));
+        return 2;
+    }
+
+    return runSimilarSearch(rest[0], rest[1], threshold, reindex);
+}
+
 int runBackgroundBatch(core::BackgroundRemover& remover, const QString& model,
                        qint64 loadMs, const QString& input,
-                       const QString& output);
+                       const QString& output, bool matte);
 
 int runBackgroundRemoval(const QStringList& args)
 {
     QStringList rest;
     bool seen = false;
+    bool matte = false;
     for (int i = 0; i < args.size(); ++i) {
         if (args[i] == QLatin1String("--bg-remove"))
             seen = true;
+        else if (seen && args[i] == QLatin1String("--matte"))
+            matte = true;
         else if (seen)
             rest.append(args[i]);
     }
@@ -201,7 +220,7 @@ int runBackgroundRemoval(const QStringList& args)
 
     const QFileInfo inputInfo(input);
     if (inputInfo.isDir())
-        return runBackgroundBatch(remover, model, loadMs, input, output);
+        return runBackgroundBatch(remover, model, loadMs, input, output, matte);
 
     const QImage source = core::loadImageForBackground(input);
     if (source.isNull()) {
@@ -218,7 +237,8 @@ int runBackgroundRemoval(const QStringList& args)
     }
     const qint64 inferMs = timer.elapsed();
 
-    if (!cutout.save(output, "PNG")) {
+    const QImage toSave = matte ? core::matteOf(cutout) : cutout;
+    if (!toSave.save(output, "PNG")) {
         std::fprintf(stderr, "error: cannot write '%s'\n",
                      qPrintable(output));
         return 1;
@@ -236,7 +256,7 @@ int runBackgroundRemoval(const QStringList& args)
 
 int runBackgroundBatch(core::BackgroundRemover& remover, const QString& model,
                        qint64 loadMs, const QString& input,
-                       const QString& output)
+                       const QString& output, bool matte)
 {
     const QDir inputDir(input);
     QDir().mkpath(output);
@@ -295,7 +315,8 @@ int runBackgroundBatch(core::BackgroundRemover& remover, const QString& model,
                     : QFileInfo(rel).path() + QLatin1Char('/') + base;
             const QString outPath = QDir(output).filePath(outRel);
             QDir().mkpath(QFileInfo(outPath).absolutePath());
-            if (cutout.save(outPath, "PNG")) {
+            const QImage toSave = matte ? core::matteOf(cutout) : cutout;
+            if (toSave.save(outPath, "PNG")) {
                 std::printf("[%d/%d] %s ok (%.1f s)\n", done, static_cast<int>(rels.size()),
                             qPrintable(rel), ms / 1000.0);
                 std::fflush(stdout);
@@ -312,6 +333,85 @@ int runBackgroundBatch(core::BackgroundRemover& remover, const QString& model,
     std::printf("batch    : %d ok, %d failed, %lld ms total\n", done - failed,
                 failed, static_cast<long long>(batchTimer.elapsed()));
     return failed ? 1 : 0;
+}
+
+int runObjectSearch(const QStringList& args)
+{
+    bool reindex = false;
+    QStringList rest;
+    bool seen = false;
+    for (int i = 0; i < args.size(); ++i) {
+        if (args[i] == QLatin1String("--object-search"))
+            seen = true;
+        else if (seen && args[i] == QLatin1String("--reindex"))
+            reindex = true;
+        else if (seen)
+            rest.append(args[i]);
+    }
+
+    if (rest.size() < 2 || rest.size() > 3) {
+        printUsage();
+        return 2;
+    }
+
+    const QString library = rest[0];
+    double threshold = 0.5;
+    if (rest.size() == 3 && !parseThreshold(rest[2], &threshold)) {
+        std::fprintf(stderr,
+                     "error: threshold must be a number from 0 to 100, "
+                     "got '%s'\n",
+                     qPrintable(rest[2]));
+        return 2;
+    }
+
+    QString model = core::defaultModelPath();
+    if (model.isEmpty()) {
+        std::fprintf(stderr,
+                     "error: no background model found; run ./fetch-model.sh "
+                     "or set LUCIDGRASP_BG_MODEL\n");
+        return 1;
+    }
+
+    core::BackgroundRemover remover;
+    QString error;
+    QElapsedTimer timer;
+    timer.start();
+    if (!remover.loadModel(model, &error)) {
+        std::fprintf(stderr, "error: cannot load model: %s\n",
+                     qPrintable(error));
+        return 1;
+    }
+
+    const QImage source = core::loadImageForBackground(rest[1]);
+    if (source.isNull()) {
+        std::fprintf(stderr, "error: cannot read query '%s'\n",
+                     qPrintable(rest[1]));
+        return 1;
+    }
+
+    QImage cutout;
+    if (!remover.removeBackground(source, &cutout, &error)) {
+        std::fprintf(stderr, "error: %s\n", qPrintable(error));
+        return 1;
+    }
+
+    QTemporaryDir tempDir;
+    if (!tempDir.isValid()) {
+        std::fprintf(stderr, "error: cannot create a temporary folder\n");
+        return 1;
+    }
+    const QString mattePath =
+        tempDir.filePath(QStringLiteral("query_matte.png"));
+    if (!core::matteOf(cutout).save(mattePath, "PNG")) {
+        std::fprintf(stderr, "error: cannot cache the query matte\n");
+        return 1;
+    }
+
+    const qint64 stripMs = timer.elapsed();
+    std::printf("strip    : %lld ms (query background removed)\n",
+                static_cast<long long>(stripMs));
+
+    return runSimilarSearch(library, mattePath, threshold, reindex);
 }
 
 }
@@ -349,6 +449,11 @@ int main(int argc, char* argv[])
     if (args.contains(QLatin1String("--cli"))) {
         QCoreApplication app(argc, argv);
         return runCli(args);
+    }
+
+    if (args.contains(QLatin1String("--object-search"))) {
+        QCoreApplication app(argc, argv);
+        return runObjectSearch(args);
     }
 
     if (args.contains(QLatin1String("--bg-remove"))) {

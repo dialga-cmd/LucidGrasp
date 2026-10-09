@@ -62,6 +62,12 @@ constexpr int kBackgroundSourceMaxDim = 4096;
 // kBackgroundSourceMaxDim. Returns a null image when the file cannot be read.
 QImage loadImageForBackground(const QString &path);
 
+// Composites a cutout onto a flat mid-gray field. Without this, fully
+// transparent pixels still carry their original background RGB, which would
+// leak into search features; flat gray also adds no ORB corners and lands in
+// a single achromatic histogram bin. Returns an empty image for a null input.
+QImage matteOf(const QImage &cutout);
+
 // Name of the background model file inside the models directory.
 QString modelFileName();
 
