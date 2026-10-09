@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <new>
 #include <string>
 #include <utility>
 
@@ -41,7 +42,7 @@ cv::Mat toRgbMat(const QImage &image)
       .clone();
 }
 
-QString ortMessage(const Ort::Exception &e)
+QString errorMessage(const std::exception &e)
 {
   return QString::fromUtf8(e.what());
 }
@@ -77,6 +78,7 @@ bool BackgroundRemover::loadModel(const QString &modelPath, QString *error)
     Ort::SessionOptions options;
     options.SetGraphOptimizationLevel(
         GraphOptimizationLevel::ORT_ENABLE_ALL);
+    options.DisableCpuMemArena();
     session_ = std::make_unique<Ort::Session>(
         onnxEnv(), modelPath.toStdString().c_str(), options);
 
@@ -100,11 +102,17 @@ bool BackgroundRemover::loadModel(const QString &modelPath, QString *error)
 
     modelPath_ = modelPath;
     return true;
-  } catch (const Ort::Exception &e) {
+  } catch (const std::bad_alloc &) {
     session_.reset();
     modelPath_.clear();
     if (error)
-      *error = ortMessage(e);
+      *error = QStringLiteral("not enough memory to load the model");
+    return false;
+  } catch (const std::exception &e) {
+    session_.reset();
+    modelPath_.clear();
+    if (error)
+      *error = errorMessage(e);
     return false;
   }
 }
@@ -253,9 +261,15 @@ bool BackgroundRemover::removeBackground(const QImage &image, QImage *cutout,
 
     *cutout = std::move(result);
     return true;
-  } catch (const Ort::Exception &e) {
+  } catch (const std::bad_alloc &) {
     if (error)
-      *error = ortMessage(e);
+      *error = QStringLiteral(
+          "not enough memory to run the background model; close other "
+          "programs or switch to the smaller lite model");
+    return false;
+  } catch (const std::exception &e) {
+    if (error)
+      *error = errorMessage(e);
     return false;
   }
 }
