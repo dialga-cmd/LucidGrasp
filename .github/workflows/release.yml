@@ -209,8 +209,8 @@ jobs:
           "moniker": "lucidgrasp"
         }
         EOF
-        git config --global user.name "github-actions[bot]"
-        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+        git config --global user.name "dialga-cmd"
+        git config --global user.email "adityaraj1234@duck.com"
         git clone https://x-access-token:$BUCKET_TOKEN@github.com/dialga-cmd/lucidgrasp-bucket.git
         cp lucidgrasp.json lucidgrasp-bucket/
         cd lucidgrasp-bucket
