@@ -115,7 +115,7 @@ bool BackgroundRemover::isLoaded() const
   return session_ != nullptr;
 }
 
-const QString &BackgroundRemover::modelPath() const
+QString BackgroundRemover::modelPath() const
 {
   std::lock_guard<std::mutex> lock(mutex_);
   return modelPath_;

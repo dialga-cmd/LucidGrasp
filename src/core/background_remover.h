@@ -29,7 +29,7 @@ public:
   bool loadModel(const QString &modelPath, QString *error = nullptr);
 
   bool isLoaded() const;
-  const QString &modelPath() const;
+  QString modelPath() const;
 
   // Preprocessing runs before any session exists, so it can be tested even
   // without a model file. Returns false on unsupported input.

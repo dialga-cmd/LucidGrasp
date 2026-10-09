@@ -1332,7 +1332,8 @@ void MainWindow::startBackgroundRemoval() {
     QString error;
     bool ok = false;
     try {
-      if (!bgRemover_.isLoaded() || bgRemover_.modelPath() != model)
+      ok = bgRemover_.isLoaded() && bgRemover_.modelPath() == model;
+      if (!ok)
         ok = bgRemover_.loadModel(model, &error);
       if (ok)
         ok = bgRemover_.removeBackground(QImage(source), &cutout, &error);
