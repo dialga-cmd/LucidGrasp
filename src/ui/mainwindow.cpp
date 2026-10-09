@@ -1613,13 +1613,18 @@ void MainWindow::startSearch() {
         if (!core::matteOf(cutout).save(searchQuery, "PNG"))
           throw std::runtime_error("cannot cache the query matte");
       }
-      ok = index_.searchFile(
-          searchQuery, threshold, results, [this](int done, int total) {
-            QMetaObject::invokeMethod(
-                this, [this, done, total] { onSearchProgress(done, total); },
-                Qt::QueuedConnection);
-            return !cancel_.load();
-          });
+      const auto progressFn = [this](int done, int total) {
+        QMetaObject::invokeMethod(
+            this, [this, done, total] { onSearchProgress(done, total); },
+            Qt::QueuedConnection);
+        return !cancel_.load();
+      };
+      if (mode != SearchMode::Visual) {
+        ok = index_.searchWithObjectRerank(searchQuery, bgRemover_, threshold,
+                                           results, progressFn);
+      } else {
+        ok = index_.searchFile(searchQuery, threshold, results, progressFn);
+      }
     } catch (const std::exception &e) {
       ok = false;
       results.clear();

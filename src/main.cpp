@@ -43,10 +43,12 @@ void printUsage()
         "      --matte composites each cutout onto a flat gray field so\n"
         "      background pixels cannot leak into search features;\n"
         "      the model defaults to the standard model location\n"
-        "  LucidGrasp --object-search [--reindex] <library> <query> [threshold%%]\n"
+        "  LucidGrasp --object-search [--reindex] [--rerank] <library> <query> [threshold%%]\n"
         "      find the same subject regardless of background; <library> must\n"
         "      be a folder of matte cutouts (see --bg-remove --matte), and the\n"
-        "      query image is stripped of its background automatically\n"
+        "      query image is stripped of its background automatically;\n"
+        "      --rerank additionally trims the strongest matches and compares\n"
+        "      them matte-to-matte (expensive, but only a few images)\n"
         "  LucidGrasp --reset-legal-agreement\n"
         "      clear the stored first-run agreement; the Welcome\n"
         "      dialog is shown again and must be agreed to enter\n");
@@ -63,7 +65,8 @@ bool parseThreshold(const QString& text, double* threshold)
 }
 
 int runSimilarSearch(const QString& library, const QString& query,
-                     double threshold, bool reindex)
+                     double threshold, bool reindex,
+                     core::BackgroundRemover* remover = nullptr)
 {
     core::ImageIndex index;
     QElapsedTimer timer;
@@ -107,17 +110,23 @@ int runSimilarSearch(const QString& library, const QString& query,
     timer.restart();
     std::vector<core::SearchResult> results;
     int lastDone = -1;
-    if (!index.searchFile(query, threshold, results,
-                          [&](int done, int total) {
-                              if (total > 0 && done != lastDone
-                                  && (done % 16 == 0 || done == total)) {
-                                  lastDone = done;
-                                  std::fprintf(stderr, "\rcomparing %d/%d   ",
-                                               done, total);
-                                  std::fflush(stderr);
-                              }
-                              return true;
-                          })) {
+    const auto report = [&](int done, int total) {
+        if (total > 0 && done != lastDone
+            && (done % 16 == 0 || done == total)) {
+            lastDone = done;
+            std::fprintf(stderr, "\rcomparing %d/%d   ", done, total);
+            std::fflush(stderr);
+        }
+        return true;
+    };
+    bool searched = false;
+    if (remover) {
+        searched = index.searchWithObjectRerank(query, *remover, threshold,
+                                                results, report);
+    } else {
+        searched = index.searchFile(query, threshold, results, report);
+    }
+    if (!searched) {
         std::fprintf(stderr, "error: cannot read query '%s'\n",
                      qPrintable(query));
         return 1;
@@ -338,6 +347,7 @@ int runBackgroundBatch(core::BackgroundRemover& remover, const QString& model,
 int runObjectSearch(const QStringList& args)
 {
     bool reindex = false;
+    bool rerank = false;
     QStringList rest;
     bool seen = false;
     for (int i = 0; i < args.size(); ++i) {
@@ -345,6 +355,8 @@ int runObjectSearch(const QStringList& args)
             seen = true;
         else if (seen && args[i] == QLatin1String("--reindex"))
             reindex = true;
+        else if (seen && args[i] == QLatin1String("--rerank"))
+            rerank = true;
         else if (seen)
             rest.append(args[i]);
     }
@@ -411,6 +423,11 @@ int runObjectSearch(const QStringList& args)
     std::printf("strip    : %lld ms (query background removed)\n",
                 static_cast<long long>(stripMs));
 
+    if (rerank) {
+        std::printf("rerank   : on (top candidates trimmed and re-scored)\n");
+        return runSimilarSearch(library, mattePath, threshold, reindex,
+                                &remover);
+    }
     return runSimilarSearch(library, mattePath, threshold, reindex);
 }
 

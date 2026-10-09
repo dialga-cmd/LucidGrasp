@@ -1,13 +1,13 @@
 #pragma once
 
+#include "core/background_remover.h"
+#include "core/cv_matcher.h"
 #include "core/features.h"
 
 #include <functional>
 #include <vector>
 
 #include <QString>
-
-#include "core/cv_matcher.h"
 
 namespace core {
 
@@ -48,6 +48,22 @@ public:
   bool searchFile(const QString &queryPath, double threshold,
                   std::vector<SearchResult> &out,
                   SearchProgressFn progress = {}) const;
+
+  // Stage-2 (rerank) candidates score at or above this cutoff; at most
+  // kObjectRerankMax of them go through background removal.
+  static constexpr double kObjectRerankCutoff = 0.5;
+  static constexpr size_t kObjectRerankMax = 24;
+
+  // Two-stage object search. Stage 1 runs the regular search on the query
+  // matte; stage 2 strips the background of the strongest stage-1 matches
+  // and re-scores them matte-to-matte, so a busy background in the library
+  // image cannot inflate a false match. `remover` must have a model loaded
+  // before this is called. Progress spans two phases: the search takes the
+  // first 70%, the background removal + re-scoring the remaining 30%.
+  bool searchWithObjectRerank(const QString &queryPath,
+                              BackgroundRemover &remover, double threshold,
+                              std::vector<SearchResult> &out,
+                              SearchProgressFn progress = {}) const;
 
   const QString &root() const { return root_; }
   int errorCount() const { return errors_; }
