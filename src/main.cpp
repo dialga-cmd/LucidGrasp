@@ -4,10 +4,13 @@
 
 #include <QApplication>
 #include <QCoreApplication>
+#include <QDir>
+#include <QDirIterator>
 #include <QElapsedTimer>
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QImage>
+#include <QImageReader>
 #include <QSettings>
 #include <QTextStream>
 
@@ -34,6 +37,8 @@ void printUsage()
         "      build a synthetic corpus and verify ranking\n"
         "  LucidGrasp --bg-remove <input> <output> [model.onnx]\n"
         "      remove the background of an image with an ONNX model;\n"
+        "      when <input> is a folder every image inside is processed\n"
+        "      (recursively) into <output> using one model load;\n"
         "      the model defaults to the standard model location\n"
         "  LucidGrasp --reset-legal-agreement\n"
         "      clear the stored first-run agreement; the Welcome\n"
@@ -152,6 +157,10 @@ int runCli(const QStringList& args)
     return 0;
 }
 
+int runBackgroundBatch(core::BackgroundRemover& remover, const QString& model,
+                       qint64 loadMs, const QString& input,
+                       const QString& output);
+
 int runBackgroundRemoval(const QStringList& args)
 {
     QStringList rest;
@@ -190,6 +199,10 @@ int runBackgroundRemoval(const QStringList& args)
     }
     const qint64 loadMs = timer.elapsed();
 
+    const QFileInfo inputInfo(input);
+    if (inputInfo.isDir())
+        return runBackgroundBatch(remover, model, loadMs, input, output);
+
     const QImage source(input);
     if (source.isNull()) {
         std::fprintf(stderr, "error: cannot read '%s'\n",
@@ -219,6 +232,84 @@ int runBackgroundRemoval(const QStringList& args)
     std::printf("cutout   : %dx%d saved to %s\n", cutout.width(),
                 cutout.height(), qPrintable(output));
     return 0;
+}
+
+int runBackgroundBatch(core::BackgroundRemover& remover, const QString& model,
+                       qint64 loadMs, const QString& input,
+                       const QString& output)
+{
+    const QDir inputDir(input);
+    QDir().mkpath(output);
+    if (!QFileInfo::exists(output) || !QFileInfo(output).isDir()) {
+        std::fprintf(stderr, "error: cannot create output folder '%s'\n",
+                     qPrintable(output));
+        return 1;
+    }
+
+    QStringList nameFilters;
+    for (const QByteArray& format : QImageReader::supportedImageFormats())
+        nameFilters << QStringLiteral("*.%1")
+                           .arg(QString::fromLatin1(format));
+    nameFilters.sort();
+
+    QStringList rels;
+    QDirIterator it(input, nameFilters, QDir::Files,
+                    QDirIterator::Subdirectories);
+    while (it.hasNext()) {
+        it.next();
+        rels << inputDir.relativeFilePath(it.filePath());
+    }
+    rels.sort();
+    if (rels.isEmpty()) {
+        std::fprintf(stderr, "error: no images found under '%s'\n",
+                     qPrintable(input));
+        return 1;
+    }
+
+    std::printf("model    : %s\n", qPrintable(model));
+    std::printf("input    : %s (%d images)\n", qPrintable(input),
+               static_cast<int>(rels.size()));
+    std::printf("load     : %lld ms\n", static_cast<long long>(loadMs));
+
+    QElapsedTimer batchTimer;
+    batchTimer.start();
+    QElapsedTimer timer;
+    int done = 0;
+    int failed = 0;
+    for (const QString& rel : rels) {
+        ++done;
+        const QString src = inputDir.filePath(rel);
+        timer.restart();
+        QImage cutout;
+        QString err;
+        const bool ok = remover.removeBackground(QImage(src), &cutout, &err);
+        const qint64 ms = timer.elapsed();
+        if (ok) {
+            const QString base =
+                QFileInfo(rel).completeBaseName() + QStringLiteral(".png");
+            const QString outRel =
+                QFileInfo(rel).path() == QLatin1String(".")
+                    ? base
+                    : QFileInfo(rel).path() + QLatin1Char('/') + base;
+            const QString outPath = QDir(output).filePath(outRel);
+            QDir().mkpath(QFileInfo(outPath).absolutePath());
+            if (cutout.save(outPath, "PNG")) {
+                std::printf("[%d/%d] %s ok (%.1f s)\n", done, static_cast<int>(rels.size()),
+                            qPrintable(rel), ms / 1000.0);
+                std::fflush(stdout);
+                continue;
+            }
+            err = QStringLiteral("cannot write %1").arg(outPath);
+        }
+        ++failed;
+        std::fprintf(stderr, "[%d/%d] %s failed: %s\n", done,
+             static_cast<int>(rels.size()),
+                     qPrintable(rel), qPrintable(err));
+    }
+
+    std::printf("batch    : %d ok, %d failed, %lld ms total\n", done - failed,
+                failed, static_cast<long long>(batchTimer.elapsed()));
+    return failed ? 1 : 0;
 }
 
 }
