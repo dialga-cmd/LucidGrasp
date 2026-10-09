@@ -41,6 +41,7 @@ parts:
       - g++
       - make
       - pkg-config
+      - curl
       - qt6-base-dev
       - libopencv-dev
     stage-packages:
