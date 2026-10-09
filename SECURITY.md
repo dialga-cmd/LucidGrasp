@@ -8,12 +8,14 @@ using **Updates → Check for Updates...**.
 
 ## Reporting a vulnerability
 
-Please do **not** open a public issue for a security vulnerability. Use one
-of the private channels instead:
+Please do **not** open a public issue for a security vulnerability. Private
+vulnerability reporting is enabled, so the preferred channel is GitHub's
+private reporting form, which opens a draft security advisory visible only
+to you and the maintainers:
 
-- GitHub private vulnerability reporting:
+- GitHub private vulnerability reporting (preferred):
   <https://github.com/dialga-cmd/LucidGrasp/security/advisories/new>
-- Email: [adityaraj1234@duck.com](mailto:adityaraj1234@duck.com)
+- Email (backup): [adityaraj1234@duck.com](mailto:adityaraj1234@duck.com)
 
 In your report, include:
 
@@ -23,7 +25,10 @@ In your report, include:
 - and, if possible, a suggested fix.
 
 Reports are handled on a best-effort basis. You will be acknowledged, and a
-coordinated disclosure timeline can be arranged if needed.
+coordinated disclosure timeline can be arranged if needed. Submitted reports
+appear as a draft security advisory in the repository's
+[Security advisories](https://github.com/dialga-cmd/LucidGrasp/security/advisories)
+and are not public until the advisory is published after a fix ships.
 
 ## Scope
 
