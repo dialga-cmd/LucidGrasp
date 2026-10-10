@@ -16,6 +16,13 @@ case "$(uname -s)-$(uname -m)" in
     ARCH=osx-arm64
     EXT=tgz
     ;;
+  Darwin-x86_64)
+    # ONNX Runtime stopped publishing x86_64 macOS builds after 1.19.x, so
+    # Intel Macs are served by the last release that still shipped one.
+    ARCH=osx-x86_64
+    VERSION=1.19.2
+    EXT=tgz
+    ;;
   MINGW*|MSYS*|CYGWIN*)
     ARCH=win-x64
     EXT=zip

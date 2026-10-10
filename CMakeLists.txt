@@ -64,8 +64,16 @@ target_link_libraries(LucidGrasp PRIVATE Qt6::Widgets Qt6::Network Threads::Thre
 
 if(ONNXRUNTIME_LIBRARY)
     get_filename_component(ONNXRUNTIME_LIB_DIR "${ONNXRUNTIME_LIBRARY}" DIRECTORY)
-    set_target_properties(LucidGrasp PROPERTIES
-        BUILD_RPATH "${ONNXRUNTIME_LIB_DIR}")
+    if(UNIX AND NOT APPLE)
+        # $ORIGIN lets a relocated Linux build (release tarball, AppImage,
+        # RPM) find the ONNX Runtime shared library shipped alongside it.
+        set_target_properties(LucidGrasp PROPERTIES
+            BUILD_RPATH "${ONNXRUNTIME_LIB_DIR};$ORIGIN"
+            INSTALL_RPATH "$ORIGIN:$ORIGIN/../lib")
+    else()
+        set_target_properties(LucidGrasp PROPERTIES
+            BUILD_RPATH "${ONNXRUNTIME_LIB_DIR}")
+    endif()
 endif()
 
 if(UNIX AND NOT APPLE)

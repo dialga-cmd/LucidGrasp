@@ -85,9 +85,11 @@ git clone https://github.com/dialga-cmd/LucidGrasp.git
 cd LucidGrasp
 ```
 
-3. Configure the build environment and compile the executable.
+3. Fetch the prebuilt ONNX Runtime for your platform (used for background
+removal and semantic search), then configure and compile the executable.
 
 ```bash
+./fetch-onnxruntime.sh
 mkdir build
 cd build
 cmake ..
@@ -122,24 +124,31 @@ The Qt version is the constraint worth knowing about first. Qt 6.5 LTS ships MSV
 
 2. Download the OpenCV Windows release from the official OpenCV GitHub releases page. Extract it to a known location (for example `C:\opencv`).
 
-3. Open a Developer Command Prompt for the 2019 toolset and run:
+3. Clone the repository, then fetch the prebuilt ONNX Runtime for Windows
+(run this from Git Bash, which ships with Git for Windows):
 
-```cmd
+```bash
 git clone https://github.com/dialga-cmd/LucidGrasp.git
 cd LucidGrasp
+./fetch-onnxruntime.sh
+```
+
+4. Open a Developer Command Prompt for the 2019 toolset and run:
+
+```cmd
 mkdir build
 cd build
 cmake .. -G "NMake Makefiles" -DCMAKE_BUILD_TYPE=Release -DOpenCV_DIR="C:\opencv\opencv\build"
 nmake
 ```
 
-4. Before running `LucidGrasp.exe`, use `windeployqt` to copy the required Qt DLLs into the build folder:
+5. Before running `LucidGrasp.exe`, use `windeployqt` to copy the required Qt DLLs into the build folder:
 
 ```cmd
 windeployqt --release LucidGrasp.exe
 ```
 
-Then copy the OpenCV world DLL from `C:\opencv\opencv\build\x64\vc16\bin\opencv_world*.dll` into the same folder. The application is now ready to run.
+Then copy the OpenCV world DLL from `C:\opencv\opencv\build\x64\vc16\bin\opencv_world*.dll` and the ONNX Runtime DLL from `third_party\onnxruntime\lib\onnxruntime.dll` into the same folder. The application is now ready to run.
 
 ### System Installation (Linux Only)
 

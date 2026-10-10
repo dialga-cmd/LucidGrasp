@@ -22,6 +22,9 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y cmake qt6-base-dev libopencv-dev g++ wget ca-certificates
 
+    - name: Fetch ONNX Runtime
+      run: ./fetch-onnxruntime.sh
+
     - name: Build Project
       run: |
         mkdir build
@@ -38,6 +41,7 @@ jobs:
       run: |
         mkdir -p package/LucidGrasp
         cp build/LucidGrasp package/LucidGrasp/
+        cp -aL third_party/onnxruntime/lib/libonnxruntime.so* package/LucidGrasp/
         cp lucidgrasp.png package/LucidGrasp/
         cp io.github.dialga_cmd.LucidGrasp.desktop package/LucidGrasp/
         cp README.md package/LucidGrasp/
@@ -101,6 +105,19 @@ jobs:
       with:
         toolset: '14.29'
 
+    - name: Fetch ONNX Runtime
+      shell: pwsh
+      run: |
+        $version = "1.28.3"
+        $url = "https://github.com/microsoft/onnxruntime/releases/download/v$version/onnxruntime-win-x64-$version.zip"
+        Invoke-WebRequest -Uri $url -OutFile onnxruntime.zip
+        Expand-Archive -Path onnxruntime.zip -DestinationPath onnxruntime-tmp -Force
+        New-Item -ItemType Directory -Path third_party -Force | Out-Null
+        Move-Item "onnxruntime-tmp\onnxruntime-win-x64-$version" "third_party\onnxruntime"
+        $dll = Get-ChildItem "third_party\onnxruntime" -Recurse -Filter onnxruntime.dll | Select-Object -First 1
+        if (-not $dll) { throw "onnxruntime.dll not found in the ONNX Runtime package" }
+        "ONNX_RUNTIME_DIR=$($dll.DirectoryName)" | Out-File -FilePath $env:GITHUB_ENV -Append
+
     - name: Build Project
       shell: pwsh
       run: |
@@ -113,7 +130,7 @@ jobs:
       shell: pwsh
       run: |
         $env:QT_QPA_PLATFORM = "offscreen"
-        $env:PATH = "$env:OpenCV_BIN;$env:PATH"
+        $env:PATH = "$env:OpenCV_BIN;$env:ONNX_RUNTIME_DIR;$env:PATH"
         .\build\LucidGrasp.exe --selftest
         if ($LASTEXITCODE -ne 0) { throw "Self-test failed (exit code $LASTEXITCODE)" }
 
@@ -128,6 +145,7 @@ jobs:
         Copy-Item LICENSE $dest\
         windeployqt --release --no-translations --no-system-d3d-compiler --no-opengl-sw $dest\LucidGrasp.exe
         Copy-Item "$env:OpenCV_BIN\opencv_world*.dll" $dest\
+        Copy-Item "$env:ONNX_RUNTIME_DIR\*.dll" $dest\
 
     - name: Install Inno Setup
       shell: pwsh

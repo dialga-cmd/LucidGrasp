@@ -30,6 +30,9 @@ jobs:
           wget -q -O appimagetool https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
           chmod +x appimagetool
 
+      - name: Fetch ONNX Runtime
+        run: ./fetch-onnxruntime.sh
+
       - name: Build LucidGrasp
         run: |
           mkdir build
@@ -40,10 +43,12 @@ jobs:
       - name: Create AppDir
         run: |
           mkdir -p AppDir/usr/bin
+          mkdir -p AppDir/usr/lib
           mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
           mkdir -p AppDir/usr/share/applications
 
           cp build/LucidGrasp AppDir/usr/bin/
+          cp -aL third_party/onnxruntime/lib/libonnxruntime.so* AppDir/usr/lib/
           cp lucidgrasp.png AppDir/usr/share/icons/hicolor/256x256/apps/io.github.dialga_cmd.LucidGrasp.png
           cp io.github.dialga_cmd.LucidGrasp.desktop AppDir/usr/share/applications/io.github.dialga_cmd.LucidGrasp.desktop
 
@@ -51,6 +56,7 @@ jobs:
           cp lucidgrasp.png AppDir/io.github.dialga_cmd.LucidGrasp.png
 
           echo '#!/bin/sh' > AppDir/AppRun
+          echo 'export LD_LIBRARY_PATH="$APPDIR/usr/lib:$LD_LIBRARY_PATH"' >> AppDir/AppRun
           echo 'exec "$APPDIR/usr/bin/LucidGrasp" "$@"' >> AppDir/AppRun
           chmod +x AppDir/AppRun
 
