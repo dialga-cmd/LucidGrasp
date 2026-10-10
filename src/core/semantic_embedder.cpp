@@ -54,6 +54,21 @@ QString candidateModelPath()
   return QString();
 }
 
+// ONNX Runtime names its path type ORTCHAR_T: a wide string on Windows and a
+// narrow one elsewhere. Convert the Qt path to whichever the platform wants
+// before handing it to the session.
+std::unique_ptr<Ort::Session> makeSession(Ort::Env &env,
+                                          const QString &modelPath,
+                                          const Ort::SessionOptions &options)
+{
+#ifdef _WIN32
+  const std::wstring native = modelPath.toStdWString();
+#else
+  const std::string native = modelPath.toStdString();
+#endif
+  return std::make_unique<Ort::Session>(env, native.c_str(), options);
+}
+
 }  // namespace
 
 SemanticEmbedder::SemanticEmbedder() = default;
@@ -74,8 +89,7 @@ bool SemanticEmbedder::loadModel(const QString &modelPath, QString *error)
     Ort::SessionOptions options;
     options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
     options.DisableCpuMemArena();
-    session_ = std::make_unique<Ort::Session>(
-        onnxEnv(), modelPath.toStdString().c_str(), options);
+    session_ = makeSession(onnxEnv(), modelPath, options);
 
     Ort::AllocatorWithDefaultOptions allocator;
     inputName_ =
