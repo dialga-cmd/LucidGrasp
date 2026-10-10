@@ -1,9 +1,11 @@
 #include "ui/mainwindow.h"
 
 #include "ui/file_actions.h"
+#include "ui/model_download.h"
 
 #include <QAbstractButton>
 #include <QAction>
+#include <QActionGroup>
 #include <QCheckBox>
 #include <QCloseEvent>
 #include <QColor>
@@ -681,6 +683,42 @@ MainWindow::~MainWindow() {
     searchWorker_.join();
 }
 
+MainWindow::SearchMode MainWindow::selectedMode() const {
+  if (similarAction_ && similarAction_->isChecked())
+    return SearchMode::Similar;
+  return SearchMode::Visual;
+}
+
+void MainWindow::applyModeButtons(SearchMode mode) {
+  switch (mode) {
+    case SearchMode::Visual:
+      visualAction_->setChecked(true);
+      break;
+    case SearchMode::Similar:
+      similarAction_->setChecked(true);
+      break;
+  }
+}
+
+void MainWindow::searchModeTriggered(QAction *action) {
+  const SearchMode mode = action == similarAction_ ? SearchMode::Similar
+                                                   : SearchMode::Visual;
+  if (mode == lastAppliedMode_)
+    return;
+
+  if (mode == SearchMode::Similar) {
+    // Selecting Similar search requires the embedding model; fetch it on
+    // first use and fall back to Visual if the download is cancelled.
+    if (ui::prepareModelForSearch(ui::SearchModel::Similar, this))
+      lastAppliedMode_ = mode;
+    else
+      applyModeButtons(lastAppliedMode_);
+    return;
+  }
+
+  lastAppliedMode_ = mode;
+}
+
 void MainWindow::buildMenus() {
   QMenuBar *bar = menuBar();
 
@@ -698,6 +736,33 @@ void MainWindow::buildMenus() {
   QAction *quitAction = file->addAction(tr("E&xit"));
   quitAction->setShortcut(QKeySequence::Quit);
   connect(quitAction, &QAction::triggered, this, &QWidget::close);
+
+  QMenu *searchMenu = bar->addMenu(tr("&Search"));
+
+  auto *modeGroup = new QActionGroup(this);
+  modeGroup->setExclusive(true);
+
+  visualAction_ = searchMenu->addAction(tr("&Visual Search"));
+  visualAction_->setCheckable(true);
+  visualAction_->setChecked(true);
+  visualAction_->setShortcut(QKeySequence(QStringLiteral("Ctrl+1")));
+  visualAction_->setToolTip(
+      QStringLiteral("Match by color, structure and keypoints"));
+  modeGroup->addAction(visualAction_);
+
+  similarAction_ = searchMenu->addAction(tr("&Similar Search"));
+  similarAction_->setCheckable(true);
+  similarAction_->setShortcut(QKeySequence(QStringLiteral("Ctrl+2")));
+  similarAction_->setToolTip(
+      QStringLiteral("Match by meaning with the DINOv2 embedding model"));
+  modeGroup->addAction(similarAction_);
+
+  // Drive the mode from the group's triggered signal rather than each
+  // action's toggled signal: an exclusive group emits toggled for the action
+  // being unchecked *and* the one being checked, and reverting inside the
+  // handler re-enters it. triggered fires exactly once per user action.
+  connect(modeGroup, &QActionGroup::triggered, this,
+          &MainWindow::searchModeTriggered);
 
   QMenu *updatesMenu = bar->addMenu(tr("&Updates"));
 
@@ -1279,6 +1344,15 @@ void MainWindow::startSearch() {
     return;
   }
 
+  const SearchMode mode = selectedMode();
+  if (mode == SearchMode::Similar &&
+      ui::checkModelStatus(ui::SearchModel::Similar) != ui::ModelStatus::Ready &&
+      !ui::prepareModelForSearch(ui::SearchModel::Similar, this)) {
+    statusBar()->showMessage(
+        QStringLiteral("Similar search model not ready."), 4000);
+    return;
+  }
+
   searching_ = true;
   cancel_ = false;
   searchBtn_->setText(QStringLiteral("Stop Search"));
@@ -1287,22 +1361,61 @@ void MainWindow::startSearch() {
   progress_->setValue(0);
   results_->clear();
   setBusy(true);
-  statusBar()->showMessage(QStringLiteral("Searching…"));
+  statusBar()->showMessage(mode == SearchMode::Visual
+                               ? QStringLiteral("Searching…")
+                               : QStringLiteral("Setting up similarity search…"));
   searchTimer_.start();
 
   const double threshold = thresholdSpin_->value() / 100.0;
-  searchWorker_ = std::thread([this, query, threshold] {
+  const QString libraryDir = libEdit_->text();
+  searchWorker_ = std::thread([this, query, threshold, mode, libraryDir] {
     std::vector<core::SearchResult> results;
     bool ok = false;
     QString error;
     try {
-      ok = index_.searchFile(
-          query, threshold, results, [this](int done, int total) {
-            QMetaObject::invokeMethod(
-                this, [this, done, total] { onSearchProgress(done, total); },
-                Qt::QueuedConnection);
-            return !cancel_.load();
-          });
+      const auto progressFn = [this](int done, int total) {
+        QMetaObject::invokeMethod(
+            this, [this, done, total] { onSearchProgress(done, total); },
+            Qt::QueuedConnection);
+        return !cancel_.load();
+      };
+
+      if (mode == SearchMode::Similar) {
+        const QString model = ui::modelStorePath(ui::SearchModel::Similar);
+        if (!semantic_.isLoaded() || semantic_.modelPath() != model) {
+          QString loadError;
+          if (!semantic_.loadModel(model, &loadError))
+            throw std::runtime_error(
+                ("cannot load the model: " + loadError).toStdString());
+        }
+        if (!index_.hasSemanticEmbeddings()) {
+          // The cached index predates Similar search (or was built without
+          // the model), so rebuild it with embeddings before ranking. The
+          // rebuild takes the first 60% of the progress bar.
+          const QString rebuildRoot = index_.root();
+          const auto buildProgress = [&progressFn](const core::BuildProgress &p) {
+            if (p.total <= 0)
+              return true;
+            return progressFn(int(qint64(p.done) * 60 / p.total), 100);
+          };
+          ok = index_.build(rebuildRoot, buildProgress, &semantic_);
+          if (ok)
+            index_.save(core::defaultIndexPath(libraryDir));
+        } else {
+          ok = true;
+        }
+        if (ok) {
+          const auto similarProgress = [&progressFn](int done, int total) {
+            if (total <= 0)
+              return true;
+            return progressFn(60 + int(qint64(done) * 40 / total), 100);
+          };
+          ok = index_.searchSemantic(query, semantic_, threshold, results,
+                                     similarProgress);
+        }
+      } else {
+        ok = index_.searchFile(query, threshold, results, progressFn);
+      }
     } catch (const std::exception &e) {
       ok = false;
       results.clear();
@@ -1525,6 +1638,10 @@ void MainWindow::updateActions() {
     indexAction_->setEnabled(!busy);
   if (queryAction_)
     queryAction_->setEnabled(!busy);
+  if (visualAction_)
+    visualAction_->setEnabled(!busy);
+  if (similarAction_)
+    similarAction_->setEnabled(!busy);
 }
 
 bool MainWindow::systemPrefersDark() const {
@@ -1690,6 +1807,13 @@ QPushButton:disabled { color: @muted; border-color: @border; }
 }
 
 #themeToggleBtn, #revealBtn, #trashBtn { padding: 0; }
+
+#modelOkBtn {
+    background: #2e7d32; color: #ffffff; border: 1px solid #2e7d32;
+    font-weight: 600; padding: 6px 16px; min-width: 76px;
+}
+#modelOkBtn:hover:enabled { background: #28692c; }
+#modelOkBtn:disabled { background: @disabled; color: @muted; border-color: @border; }
 
 QProgressBar {
     background: @field; border: 1px solid @border; border-radius: 6px;

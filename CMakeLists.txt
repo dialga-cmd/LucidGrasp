@@ -1,9 +1,11 @@
 cmake_minimum_required(VERSION 3.16)
-project(LucidGrasp VERSION 1.2.5 LANGUAGES CXX)
+project(LucidGrasp VERSION 1.2.6 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
+
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets Network)
 find_package(Threads REQUIRED)
@@ -26,11 +28,24 @@ set(SOURCES
     src/core/features.cpp
     src/core/index.h
     src/core/index.cpp
+    src/core/semantic_embedder.h
+    src/core/semantic_embedder.cpp
     src/ui/mainwindow.h
     src/ui/mainwindow.cpp
     src/ui/file_actions.h
     src/ui/file_actions.cpp
+    src/ui/model_download.h
+    src/ui/model_download.cpp
 )
+
+set(LUCIDGRASP_ONNXRUNTIME_ROOT ""
+    CACHE PATH "Root directory of a prebuilt ONNX Runtime package")
+
+if(NOT LUCIDGRASP_ONNXRUNTIME_ROOT
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/onnxruntime/include/onnxruntime_cxx_api.h")
+    set(LUCIDGRASP_ONNXRUNTIME_ROOT
+        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/onnxruntime")
+endif()
 
 if(WIN32)
     list(APPEND SOURCES lucidgrasp.rc)
@@ -41,7 +56,23 @@ add_executable(LucidGrasp ${SOURCES})
 target_include_directories(LucidGrasp PRIVATE src)
 find_package(OpenCV REQUIRED)
 target_link_libraries(LucidGrasp PRIVATE ${OpenCV_LIBS})
+find_package(ONNXRuntime REQUIRED)
+target_link_libraries(LucidGrasp PRIVATE ONNXRuntime::ONNXRuntime)
 target_link_libraries(LucidGrasp PRIVATE Qt6::Widgets Qt6::Network Threads::Threads)
+
+if(ONNXRUNTIME_LIBRARY)
+    get_filename_component(ONNXRUNTIME_LIB_DIR "${ONNXRUNTIME_LIBRARY}" DIRECTORY)
+    if(UNIX AND NOT APPLE)
+        # $ORIGIN lets a relocated Linux build (release tarball, AppImage,
+        # RPM) find the ONNX Runtime shared library shipped alongside it.
+        set_target_properties(LucidGrasp PROPERTIES
+            BUILD_RPATH "${ONNXRUNTIME_LIB_DIR};$ORIGIN"
+            INSTALL_RPATH "$ORIGIN:$ORIGIN/../lib")
+    else()
+        set_target_properties(LucidGrasp PROPERTIES
+            BUILD_RPATH "${ONNXRUNTIME_LIB_DIR}")
+    endif()
+endif()
 
 if(UNIX AND NOT APPLE)
     target_link_libraries(LucidGrasp PRIVATE Qt6::DBus)

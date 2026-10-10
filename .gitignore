@@ -10,6 +10,7 @@ CMakeFiles/
 CMakeUserPresets.json
 Makefile
 *.cmake
+!cmake/**
 *.o
 *.a
 *.so
