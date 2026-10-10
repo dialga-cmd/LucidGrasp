@@ -37,17 +37,10 @@ void printUsage()
         "      force a fresh index\n"
         "  LucidGrasp --selftest\n"
         "      build a synthetic corpus and verify ranking\n"
-        "  LucidGrasp --bg-remove [--matte] <input> <output> [model.onnx]\n"
-        "      remove the background of an image with an ONNX model;\n"
-        "      when <input> is a folder every image inside is processed\n"
-        "      (recursively) into <output> using one model load;\n"
-        "      --matte composites each cutout onto a flat gray field so\n"
-        "      background pixels cannot leak into search features;\n"
-        "      the model defaults to the standard model location\n"
         "  LucidGrasp --object-search [--reindex] [--rerank] <library> <query> [threshold%%]\n"
-        "      find the same subject regardless of background; <library> must\n"
-        "      be a folder of matte cutouts (see --bg-remove --matte), and the\n"
-        "      query image is stripped of its background automatically;\n"
+        "      find the same subject regardless of background; <library>\n"
+        "      should hold matte cutouts, and the query image is stripped\n"
+        "      of its background automatically;\n"
         "      --rerank additionally trims the strongest matches and compares\n"
         "      them matte-to-matte (expensive, but only a few images)\n"
         "  LucidGrasp --semantic [--reindex] <library> <query> [threshold%%]\n"
@@ -186,168 +179,6 @@ int runCli(const QStringList& args)
     }
 
     return runSimilarSearch(rest[0], rest[1], threshold, reindex);
-}
-
-int runBackgroundBatch(core::BackgroundRemover& remover, const QString& model,
-                       qint64 loadMs, const QString& input,
-                       const QString& output, bool matte);
-
-int runBackgroundRemoval(const QStringList& args)
-{
-    QStringList rest;
-    bool seen = false;
-    bool matte = false;
-    for (int i = 0; i < args.size(); ++i) {
-        if (args[i] == QLatin1String("--bg-remove"))
-            seen = true;
-        else if (seen && args[i] == QLatin1String("--matte"))
-            matte = true;
-        else if (seen)
-            rest.append(args[i]);
-    }
-
-    if (rest.size() < 2 || rest.size() > 3) {
-        printUsage();
-        return 2;
-    }
-
-    const QString input = rest[0];
-    const QString output = rest[1];
-    QString model =
-        rest.size() == 3 ? rest[2] : core::defaultModelPath();
-    if (model.isEmpty()) {
-        std::fprintf(stderr,
-                     "error: no background model found; run ./fetch-model.sh "
-                     "or pass a model path as the third argument\n");
-        return 1;
-    }
-
-    core::BackgroundRemover remover;
-    QString error;
-    QElapsedTimer timer;
-    timer.start();
-    if (!remover.loadModel(model, &error)) {
-        std::fprintf(stderr, "error: cannot load model: %s\n",
-                     qPrintable(error));
-        return 1;
-    }
-    const qint64 loadMs = timer.elapsed();
-
-    const QFileInfo inputInfo(input);
-    if (inputInfo.isDir())
-        return runBackgroundBatch(remover, model, loadMs, input, output, matte);
-
-    const QImage source = core::loadImageForBackground(input);
-    if (source.isNull()) {
-        std::fprintf(stderr, "error: cannot read '%s'\n",
-                     qPrintable(input));
-        return 1;
-    }
-
-    timer.restart();
-    QImage cutout;
-    if (!remover.removeBackground(source, &cutout, &error)) {
-        std::fprintf(stderr, "error: %s\n", qPrintable(error));
-        return 1;
-    }
-    const qint64 inferMs = timer.elapsed();
-
-    const QImage toSave = matte ? core::matteOf(cutout) : cutout;
-    if (!toSave.save(output, "PNG")) {
-        std::fprintf(stderr, "error: cannot write '%s'\n",
-                     qPrintable(output));
-        return 1;
-    }
-
-    std::printf("model    : %s\n", qPrintable(model));
-    std::printf("input    : %dx%d\n", source.width(), source.height());
-    std::printf("load     : %lld ms, inference %lld ms\n",
-                static_cast<long long>(loadMs),
-                static_cast<long long>(inferMs));
-    std::printf("cutout   : %dx%d saved to %s\n", cutout.width(),
-                cutout.height(), qPrintable(output));
-    return 0;
-}
-
-int runBackgroundBatch(core::BackgroundRemover& remover, const QString& model,
-                       qint64 loadMs, const QString& input,
-                       const QString& output, bool matte)
-{
-    const QDir inputDir(input);
-    QDir().mkpath(output);
-    if (!QFileInfo::exists(output) || !QFileInfo(output).isDir()) {
-        std::fprintf(stderr, "error: cannot create output folder '%s'\n",
-                     qPrintable(output));
-        return 1;
-    }
-
-    QStringList nameFilters;
-    for (const QByteArray& format : QImageReader::supportedImageFormats())
-        nameFilters << QStringLiteral("*.%1")
-                           .arg(QString::fromLatin1(format));
-    nameFilters.sort();
-
-    QStringList rels;
-    QDirIterator it(input, nameFilters, QDir::Files,
-                    QDirIterator::Subdirectories);
-    while (it.hasNext()) {
-        it.next();
-        rels << inputDir.relativeFilePath(it.filePath());
-    }
-    rels.sort();
-    if (rels.isEmpty()) {
-        std::fprintf(stderr, "error: no images found under '%s'\n",
-                     qPrintable(input));
-        return 1;
-    }
-
-    std::printf("model    : %s\n", qPrintable(model));
-    std::printf("input    : %s (%d images)\n", qPrintable(input),
-               static_cast<int>(rels.size()));
-    std::printf("load     : %lld ms\n", static_cast<long long>(loadMs));
-
-    QElapsedTimer batchTimer;
-    batchTimer.start();
-    QElapsedTimer timer;
-    int done = 0;
-    int failed = 0;
-    for (const QString& rel : rels) {
-        ++done;
-        const QString src = inputDir.filePath(rel);
-        timer.restart();
-        QImage cutout;
-        QString err;
-        const bool ok =
-            remover.removeBackground(core::loadImageForBackground(src),
-                                     &cutout, &err);
-        const qint64 ms = timer.elapsed();
-        if (ok) {
-            const QString base = QFileInfo(rel).fileName()
-                                 + QStringLiteral("_cutout.png");
-            const QString outRel =
-                QFileInfo(rel).path() == QLatin1String(".")
-                    ? base
-                    : QFileInfo(rel).path() + QLatin1Char('/') + base;
-            const QString outPath = QDir(output).filePath(outRel);
-            QDir().mkpath(QFileInfo(outPath).absolutePath());
-            const QImage toSave = matte ? core::matteOf(cutout) : cutout;
-            if (toSave.save(outPath, "PNG")) {
-                std::printf("[%d/%d] %s ok (%.1f s)\n", done, static_cast<int>(rels.size()),
-                            qPrintable(rel), ms / 1000.0);
-                std::fflush(stdout);
-                continue;
-            }
-            err = QStringLiteral("cannot write %1").arg(outPath);
-        }
-        ++failed;
-        std::fprintf(stderr, "[%d/%d] %s failed: %s\n", done,
-             static_cast<int>(rels.size()),
-                     qPrintable(rel), qPrintable(err));
-    }
-
-    std::printf("batch    : %d ok, %d failed, %lld ms total\n", done - failed,
-                failed, static_cast<long long>(batchTimer.elapsed()));
-    return failed ? 1 : 0;
 }
 
 int runObjectSearch(const QStringList& args)
@@ -611,11 +442,6 @@ int main(int argc, char* argv[])
     if (args.contains(QLatin1String("--object-search"))) {
         QCoreApplication app(argc, argv);
         return runObjectSearch(args);
-    }
-
-    if (args.contains(QLatin1String("--bg-remove"))) {
-        QCoreApplication app(argc, argv);
-        return runBackgroundRemoval(args);
     }
 
 #if defined(Q_OS_LINUX)

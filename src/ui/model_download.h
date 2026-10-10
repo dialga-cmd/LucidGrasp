@@ -38,10 +38,4 @@ ModelStatus checkModelStatus(SearchModel model);
 // may be applied; false when cancelled or the download failed.
 bool prepareModelForSearch(SearchModel model, QWidget *parent);
 
-// Legacy helper for the standalone background-removal action. Returns the
-// path of the general model once it is present, or an empty string when
-// cancelled or on failure.
-QString backgroundModelStorePath();
-QString ensureBackgroundModel(QWidget *parent);
-
 }  // namespace ui

@@ -60,7 +60,6 @@ private slots:
     void stopIndex();
     void startSearch();
     void stopSearch();
-    void startBackgroundRemoval();
     void openResult(QListWidgetItem* item);
     void revealResult();
     void trashResult();
@@ -76,9 +75,6 @@ private:
     void onSearchProgress(int done, int total);
     void onSearchFinished(bool ok, std::vector<core::SearchResult> results,
                           const QString& error);
-    void onBackgroundDone(bool ok, const QString& sourcePath,
-                          const QImage& cutout, const QString& error);
-    void showBackgroundResult(const QString& sourcePath, const QImage& cutout);
     void renderResults(const std::vector<core::SearchResult>& results);
     void updateActions();
     void updateResultActions();
@@ -146,13 +142,10 @@ private:
     core::ImageIndex index_;
     std::thread worker_;
     std::thread searchWorker_;
-    std::thread bgWorker_;
     std::atomic<bool> cancel_{false};
     QElapsedTimer searchTimer_;
     bool indexing_ = false;
     bool searching_ = false;
-    bool bgBusy_ = false;
     core::BackgroundRemover bgRemover_;
     core::SemanticEmbedder semantic_;
-    QAction* bgAction_ = nullptr;
 };

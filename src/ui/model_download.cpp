@@ -345,11 +345,6 @@ QString modelDisplayName(SearchModel model)
   return QLatin1String(infoFor(model).displayName);
 }
 
-QString backgroundModelStorePath()
-{
-  return modelStorePath(SearchModel::General);
-}
-
 ModelStatus checkModelStatus(SearchModel model)
 {
   const ModelInfo &info = infoFor(model);
@@ -378,15 +373,6 @@ bool prepareModelForSearch(SearchModel model, QWidget *parent)
   if (dialog.exec() != QDialog::Accepted)
     return false;
   return dialog.isReady();
-}
-
-QString ensureBackgroundModel(QWidget *parent)
-{
-  if (checkModelStatus(SearchModel::General) == ModelStatus::Ready)
-    return backgroundModelStorePath();
-  if (prepareModelForSearch(SearchModel::General, parent))
-    return backgroundModelStorePath();
-  return QString();
 }
 
 }  // namespace ui
