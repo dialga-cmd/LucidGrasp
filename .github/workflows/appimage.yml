@@ -48,7 +48,7 @@ jobs:
           mkdir -p AppDir/usr/share/applications
 
           cp build/LucidGrasp AppDir/usr/bin/
-          cp -aL third_party/onnxruntime/lib/libonnxruntime.so* AppDir/usr/lib/
+          cp -a third_party/onnxruntime/lib/libonnxruntime.so* AppDir/usr/lib/
           cp lucidgrasp.png AppDir/usr/share/icons/hicolor/256x256/apps/io.github.dialga_cmd.LucidGrasp.png
           cp io.github.dialga_cmd.LucidGrasp.desktop AppDir/usr/share/applications/io.github.dialga_cmd.LucidGrasp.desktop
 
