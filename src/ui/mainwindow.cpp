@@ -624,9 +624,14 @@ MainWindow::MainWindow(QWidget *parent)
   modelLayout->addWidget(generalRadio_);
   optionsLayout->addWidget(modelHost);
 
+  semanticRadio_ = new QRadioButton(QStringLiteral("Semantic Search"), optionsGroup_);
+  semanticRadio_->setToolTip(
+      QStringLiteral("Match by meaning with an AI embedding model"));
+  optionsLayout->addWidget(semanticRadio_);
+
   auto *optionsHint =
-      new QLabel(QStringLiteral("Similar search fetches the model on first "
-                                "use when it is missing."),
+      new QLabel(QStringLiteral("Similar and Semantic search fetch their "
+                                "model on first use when it is missing."),
                  optionsGroup_);
   optionsHint->setObjectName(QStringLiteral("modelHintLabel"));
   optionsHint->setWordWrap(true);
@@ -740,6 +745,8 @@ MainWindow::MainWindow(QWidget *parent)
            &MainWindow::searchModeChanged);
   connect(generalRadio_, &QRadioButton::toggled, this,
            &MainWindow::searchModeChanged);
+  connect(semanticRadio_, &QRadioButton::toggled, this,
+           &MainWindow::searchModeChanged);
   connect(similarRadio_, &QRadioButton::toggled, this,
            [this](bool on) {
              liteRadio_->setEnabled(on);
@@ -775,10 +782,11 @@ MainWindow::~MainWindow() {
 }
 
 MainWindow::SearchMode MainWindow::selectedMode() const {
-  if (liteRadio_->isChecked())
-    return SearchMode::SimilarLite;
-  if (generalRadio_->isChecked())
-    return SearchMode::SimilarGeneral;
+  if (semanticRadio_->isChecked())
+    return SearchMode::Semantic;
+  if (similarRadio_->isChecked())
+    return generalRadio_->isChecked() ? SearchMode::SimilarGeneral
+                                      : SearchMode::SimilarLite;
   return SearchMode::Visual;
 }
 
@@ -794,6 +802,9 @@ void MainWindow::applyModeButtons(SearchMode mode) {
     case SearchMode::SimilarGeneral:
       similarRadio_->setChecked(true);
       generalRadio_->setChecked(true);
+      break;
+    case SearchMode::Semantic:
+      semanticRadio_->setChecked(true);
       break;
   }
 }
@@ -816,6 +827,14 @@ void MainWindow::searchModeChanged() {
   if (mode == SearchMode::Visual) {
     bgRemover_.unload();
     lastAppliedMode_ = mode;
+    return;
+  }
+
+  if (mode == SearchMode::Semantic) {
+    if (ui::prepareModelForSearch(ui::SearchModel::Semantic, this))
+      lastAppliedMode_ = mode;
+    else
+      applyModeButtons(lastAppliedMode_);
     return;
   }
 
@@ -1558,16 +1577,23 @@ void MainWindow::startSearch() {
   }
 
   const SearchMode mode = selectedMode();
-  const ui::SearchModel want = mode == SearchMode::SimilarLite
-                                   ? ui::SearchModel::Lite
-                                   : ui::SearchModel::General;
-  if (mode != SearchMode::Visual &&
-      ui::checkModelStatus(want) != ui::ModelStatus::Ready) {
-    if (!ui::prepareModelForSearch(want, this)) {
+  if (mode == SearchMode::SimilarLite || mode == SearchMode::SimilarGeneral) {
+    const ui::SearchModel want = mode == SearchMode::SimilarLite
+                                     ? ui::SearchModel::Lite
+                                     : ui::SearchModel::General;
+    if (ui::checkModelStatus(want) != ui::ModelStatus::Ready &&
+        !ui::prepareModelForSearch(want, this)) {
       statusBar()->showMessage(
           QStringLiteral("Similar search model not ready."), 4000);
       return;
     }
+  } else if (mode == SearchMode::Semantic &&
+             ui::checkModelStatus(ui::SearchModel::Semantic) !=
+                 ui::ModelStatus::Ready &&
+             !ui::prepareModelForSearch(ui::SearchModel::Semantic, this)) {
+    statusBar()->showMessage(
+        QStringLiteral("Semantic search model not ready."), 4000);
+    return;
   }
 
   searching_ = true;
@@ -1584,14 +1610,20 @@ void MainWindow::startSearch() {
   searchTimer_.start();
 
   const double threshold = thresholdSpin_->value() / 100.0;
-  searchWorker_ = std::thread([this, query, threshold, mode, want] {
+  const QString libraryDir = libEdit_->text();
+  searchWorker_ = std::thread([this, query, threshold, mode, libraryDir] {
     std::vector<core::SearchResult> results;
     bool ok = false;
     QString error;
     std::unique_ptr<QTemporaryDir> tempDir;
     try {
       QString searchQuery = query;
-      if (mode != SearchMode::Visual) {
+      const bool similar = mode == SearchMode::SimilarLite ||
+                           mode == SearchMode::SimilarGeneral;
+      if (similar) {
+        const ui::SearchModel want = mode == SearchMode::SimilarLite
+                                         ? ui::SearchModel::Lite
+                                         : ui::SearchModel::General;
         const QString model = ui::modelStorePath(want);
         if (!bgRemover_.isLoaded() || bgRemover_.modelPath() != model) {
           QString loadError;
@@ -1613,13 +1645,49 @@ void MainWindow::startSearch() {
         if (!core::matteOf(cutout).save(searchQuery, "PNG"))
           throw std::runtime_error("cannot cache the query matte");
       }
+
       const auto progressFn = [this](int done, int total) {
         QMetaObject::invokeMethod(
             this, [this, done, total] { onSearchProgress(done, total); },
             Qt::QueuedConnection);
         return !cancel_.load();
       };
-      if (mode != SearchMode::Visual) {
+
+      if (mode == SearchMode::Semantic) {
+        const QString model = ui::modelStorePath(ui::SearchModel::Semantic);
+        if (!semantic_.isLoaded() || semantic_.modelPath() != model) {
+          QString loadError;
+          if (!semantic_.loadModel(model, &loadError))
+            throw std::runtime_error(
+                ("cannot load the semantic model: " + loadError)
+                    .toStdString());
+        }
+        if (!index_.hasSemanticEmbeddings()) {
+          // The cached index predates semantic search (or was built without
+          // the model), so rebuild it with embeddings before ranking. The
+          // rebuild takes the first 60% of the progress bar.
+          const QString rebuildRoot = index_.root();
+          const auto buildProgress = [&progressFn](const core::BuildProgress &p) {
+            if (p.total <= 0)
+              return true;
+            return progressFn(int(qint64(p.done) * 60 / p.total), 100);
+          };
+          ok = index_.build(rebuildRoot, buildProgress, &semantic_);
+          if (ok)
+            index_.save(core::defaultIndexPath(libraryDir));
+        } else {
+          ok = true;
+        }
+        if (ok) {
+          const auto semanticProgress = [&progressFn](int done, int total) {
+            if (total <= 0)
+              return true;
+            return progressFn(60 + int(qint64(done) * 40 / total), 100);
+          };
+          ok = index_.searchSemantic(query, semantic_, threshold, results,
+                                     semanticProgress);
+        }
+      } else if (similar) {
         ok = index_.searchWithObjectRerank(searchQuery, bgRemover_, threshold,
                                            results, progressFn);
       } else {

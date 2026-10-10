@@ -52,6 +52,14 @@ const ModelInfo kModelInfo[] = {
      "General model (BiRefNet)",
      972666916,
      1},
+    {"semantic",
+     "dinov2_small_int8.onnx",
+     "https://huggingface.co/onnx-community/dinov2-small/resolve/"
+     "8b1f705a3a7f6f062f6bdd21986c1583d3ef105d/onnx/model_int8.onnx",
+     "70279b6f33ef8a85966ef8f8493a3f2b",
+     "Semantic model (DINOv2 small)",
+     24446700,
+     1},
 };
 
 const ModelInfo &infoFor(SearchModel model)
@@ -95,7 +103,7 @@ public:
   ModelSetupDialog(SearchModel model, QWidget *parent)
       : QDialog(parent), model_(model)
   {
-    setWindowTitle(tr("Similar search model"));
+    setWindowTitle(tr("Search model"));
     setWindowModality(Qt::WindowModal);
     resize(520, 340);
 

@@ -14,8 +14,13 @@ case "$VARIANT" in
     MD5="4fab47adc4ff364be1713e97b7e66334"
     OUT="models/birefnet-general-lite.onnx"
     ;;
+  semantic)
+    URL="https://huggingface.co/onnx-community/dinov2-small/resolve/8b1f705a3a7f6f062f6bdd21986c1583d3ef105d/onnx/model_int8.onnx"
+    MD5="70279b6f33ef8a85966ef8f8493a3f2b"
+    OUT="models/dinov2_small_int8.onnx"
+    ;;
   *)
-    echo "usage: $0 [general|lite]" >&2
+    echo "usage: $0 [general|lite|semantic]" >&2
     exit 2
     ;;
 esac

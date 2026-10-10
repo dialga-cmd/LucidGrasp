@@ -6,10 +6,12 @@ class QWidget;
 
 namespace ui {
 
-// Model variant used by the object-based similar search.
+// Model variant used by the object-based similar search and by the semantic
+// (meaning-based) search.
 enum class SearchModel {
   Lite,
   General,
+  Semantic,
 };
 
 // Absolute path where a model variant lives in the per-user data directory.

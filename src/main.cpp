@@ -17,6 +17,7 @@
 
 #include "core/background_remover.h"
 #include "core/index.h"
+#include "core/semantic_embedder.h"
 #include "selftest.h"
 #include "ui/mainwindow.h"
 
@@ -49,6 +50,11 @@ void printUsage()
         "      query image is stripped of its background automatically;\n"
         "      --rerank additionally trims the strongest matches and compares\n"
         "      them matte-to-matte (expensive, but only a few images)\n"
+        "  LucidGrasp --semantic [--reindex] <library> <query> [threshold%%]\n"
+        "      meaning-based search powered by the DINOv2 embedding model;\n"
+        "      ranks the library by how related the image content is rather\n"
+        "      than by raw pixel similarity; the model defaults to the\n"
+        "      standard model location (see ./fetch-model.sh semantic)\n"
         "  LucidGrasp --reset-legal-agreement\n"
         "      clear the stored first-run agreement; the Welcome\n"
         "      dialog is shown again and must be agreed to enter\n");
@@ -431,6 +437,135 @@ int runObjectSearch(const QStringList& args)
     return runSimilarSearch(library, mattePath, threshold, reindex);
 }
 
+int runSemanticSearch(const QStringList& args)
+{
+    bool reindex = false;
+    QStringList rest;
+    bool seen = false;
+    for (int i = 0; i < args.size(); ++i) {
+        if (args[i] == QLatin1String("--semantic"))
+            seen = true;
+        else if (seen && args[i] == QLatin1String("--reindex"))
+            reindex = true;
+        else if (seen)
+            rest.append(args[i]);
+    }
+
+    if (rest.size() < 2 || rest.size() > 3) {
+        printUsage();
+        return 2;
+    }
+
+    const QString library = rest[0];
+    const QString query = rest[1];
+    double threshold = 0.5;
+    if (rest.size() == 3 && !parseThreshold(rest[2], &threshold)) {
+        std::fprintf(stderr,
+                     "error: threshold must be a number from 0 to 100, "
+                     "got '%s'\n",
+                     qPrintable(rest[2]));
+        return 2;
+    }
+
+    const QString model = core::defaultSemanticModelPath();
+    if (model.isEmpty()) {
+        std::fprintf(stderr,
+                     "error: no semantic model found; run ./fetch-model.sh "
+                     "semantic or set LUCIDGRASP_SEMANTIC_MODEL\n");
+        return 1;
+    }
+
+    core::SemanticEmbedder embedder;
+    QString error;
+    QElapsedTimer timer;
+    timer.start();
+    if (!embedder.loadModel(model, &error)) {
+        std::fprintf(stderr, "error: cannot load the semantic model: %s\n",
+                     qPrintable(error));
+        return 1;
+    }
+    const qint64 loadMs = timer.elapsed();
+
+    core::ImageIndex index;
+    const QString cache = core::defaultIndexPath(library);
+    const QString legacy = core::legacyIndexPath(library);
+    const QString loadFrom = QFileInfo::exists(cache) ? cache : legacy;
+
+    bool loaded = false;
+    if (!reindex && QFileInfo::exists(loadFrom) && index.load(loadFrom)
+        && index.hasSemanticEmbeddings()) {
+        loaded = true;
+    } else {
+        int lastPct = -1;
+        const bool built = index.build(
+            library,
+            [&](const core::BuildProgress& p) {
+                const int pct = p.total > 0
+                                    ? int(qint64(p.done) * 100 / p.total)
+                                    : 0;
+                if (pct != lastPct) {
+                    lastPct = pct;
+                    std::fprintf(stderr, "\rindexing %3d%% (%d files)   ", pct,
+                                 p.total);
+                    std::fflush(stderr);
+                }
+                return true;
+            },
+            &embedder);
+        std::fprintf(stderr, "\r");
+        if (!built) {
+            std::fprintf(stderr, "error: cannot index '%s'\n",
+                         qPrintable(library));
+            return 1;
+        }
+        if (!index.save(cache))
+            std::fprintf(stderr, "warning: could not write index cache '%s'\n",
+                         qPrintable(cache));
+    }
+    const qint64 indexMs = timer.elapsed();
+
+    timer.restart();
+    std::vector<core::SearchResult> results;
+    int lastDone = -1;
+    const auto report = [&](int done, int total) {
+        if (total > 0 && done != lastDone
+            && (done % 16 == 0 || done == total)) {
+            lastDone = done;
+            std::fprintf(stderr, "\rcomparing %d/%d   ", done, total);
+            std::fflush(stderr);
+        }
+        return true;
+    };
+    const bool searched =
+        index.searchSemantic(query, embedder, threshold, results, report);
+    if (!searched) {
+        std::fprintf(stderr, "error: cannot read query '%s'\n",
+                     qPrintable(query));
+        return 1;
+    }
+    std::fprintf(stderr, "\r");
+    const qint64 searchMs = timer.elapsed();
+
+    std::printf("library : %s\n", qPrintable(library));
+    std::printf("model   : %s\n", qPrintable(model));
+    std::printf("indexed : %zu images%s, %d skipped  (%lld ms, %s)\n",
+                size_t(index.size()),
+                loaded ? " (cached)" : "",
+                index.errorCount(), static_cast<long long>(indexMs),
+                loaded ? "load" : "build");
+    std::printf("query   : %s\n", qPrintable(query));
+    std::printf("load    : %lld ms\n", static_cast<long long>(loadMs));
+    std::printf("search  : %lld ms, %zu results above %.0f%% threshold\n\n",
+                static_cast<long long>(searchMs), results.size(),
+                threshold * 100.0);
+    std::printf(" rank   score  path\n");
+
+    for (size_t i = 0; i < results.size(); ++i)
+        std::printf("%5zu  %6.3f  %s\n", i + 1, results[i].score,
+                    qPrintable(results[i].relPath));
+    return 0;
+}
+
 }
 
 int main(int argc, char* argv[])
@@ -466,6 +601,11 @@ int main(int argc, char* argv[])
     if (args.contains(QLatin1String("--cli"))) {
         QCoreApplication app(argc, argv);
         return runCli(args);
+    }
+
+    if (args.contains(QLatin1String("--semantic"))) {
+        QCoreApplication app(argc, argv);
+        return runSemanticSearch(args);
     }
 
     if (args.contains(QLatin1String("--object-search"))) {

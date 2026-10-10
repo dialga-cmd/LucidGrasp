@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(LucidGrasp VERSION 1.2.5 LANGUAGES CXX)
+project(LucidGrasp VERSION 1.2.6 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -30,6 +30,8 @@ set(SOURCES
     src/core/features.cpp
     src/core/index.h
     src/core/index.cpp
+    src/core/semantic_embedder.h
+    src/core/semantic_embedder.cpp
     src/ui/mainwindow.h
     src/ui/mainwindow.cpp
     src/ui/file_actions.h

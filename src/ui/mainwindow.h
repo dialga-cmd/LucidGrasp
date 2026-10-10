@@ -38,11 +38,13 @@ public:
 
     // Search mode selected in the "Search Options" panel. Visual is the
     // plain feature match; Similar runs the query through background removal
-    // first, using one of the two model variants.
+    // first, using one of the two model variants; Semantic ranks by meaning
+    // with the embedding model.
     enum class SearchMode {
         Visual,
         SimilarLite,
         SimilarGeneral,
+        Semantic,
     };
 
 protected:
@@ -115,6 +117,7 @@ private:
     QRadioButton* similarRadio_ = nullptr;
     QRadioButton* liteRadio_ = nullptr;
     QRadioButton* generalRadio_ = nullptr;
+    QRadioButton* semanticRadio_ = nullptr;
     SearchMode lastAppliedMode_ = SearchMode::Visual;
     QPalette desktopPalette_;
     bool panelsSized_ = false;
@@ -150,5 +153,6 @@ private:
     bool searching_ = false;
     bool bgBusy_ = false;
     core::BackgroundRemover bgRemover_;
+    core::SemanticEmbedder semantic_;
     QAction* bgAction_ = nullptr;
 };

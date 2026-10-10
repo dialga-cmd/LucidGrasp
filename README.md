@@ -43,6 +43,12 @@ Those three percentages weight the OpenCV comparison against each other. The sco
 
 Running those three algorithms against every indexed image would make each search slower the more you index, so searching happens in two stages. Every image is first ranked using the perceptual and difference hashes already stored in the index, which is pure in-memory arithmetic and touches no files. The highest-ranked candidates - at least 256, scaling up to a 2048 ceiling as the library grows - are then decoded and put through the full OpenCV comparison above. Because the expensive half of the work is capped, the time a search spends decoding and comparing images does not grow as the library does, while the top of the ranking stays the same as a full scan would produce. Ranking the shortlist is still a linear pass over the index, but it is arithmetic on data already in memory rather than image decoding, so it stays in the low milliseconds even for a whole-filesystem library.
 
+### Semantic Search
+
+Alongside Visual and Similar search, LucidGrasp offers a **Semantic Search** mode that matches by *meaning* rather than by pixels. Each image is run through DINOv2-small, a small vision transformer that turns it into a compact descriptor of what is in the picture; a search ranks the library by how close each descriptor is to the query's. Because the descriptor captures the subject rather than the exact pixels, two photos of the same kind of thing score high even when they differ in background, crop, or lighting, and the background-removal step used by Similar search is not needed at all.
+
+The semantic model is about 24 MB and is not shipped with the application. It is fetched on first use, exactly like the similar-search models, and the semantic data is added to the index the first time a semantic search runs. You can also fetch it ahead of time with `./fetch-model.sh semantic`.
+
 ### Planned Expansion
 
 The long term goal for this project is global discovery. The local search functionality serves as the foundation for a much larger distributed network crawler. Upcoming updates will introduce the ability to scan websites and deep web repositories for specific images. This will turn the application into a powerful asset for cybersecurity professionals and researchers who need to track the spread of sensitive media across the internet.
