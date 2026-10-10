@@ -700,8 +700,9 @@ void MainWindow::applyModeButtons(SearchMode mode) {
   }
 }
 
-void MainWindow::searchModeChanged() {
-  const SearchMode mode = selectedMode();
+void MainWindow::searchModeTriggered(QAction *action) {
+  const SearchMode mode = action == similarAction_ ? SearchMode::Similar
+                                                   : SearchMode::Visual;
   if (mode == lastAppliedMode_)
     return;
 
@@ -748,8 +749,6 @@ void MainWindow::buildMenus() {
   visualAction_->setToolTip(
       QStringLiteral("Match by color, structure and keypoints"));
   modeGroup->addAction(visualAction_);
-  connect(visualAction_, &QAction::toggled, this,
-          &MainWindow::searchModeChanged);
 
   similarAction_ = searchMenu->addAction(tr("&Similar Search"));
   similarAction_->setCheckable(true);
@@ -757,8 +756,13 @@ void MainWindow::buildMenus() {
   similarAction_->setToolTip(
       QStringLiteral("Match by meaning with the DINOv2 embedding model"));
   modeGroup->addAction(similarAction_);
-  connect(similarAction_, &QAction::toggled, this,
-          &MainWindow::searchModeChanged);
+
+  // Drive the mode from the group's triggered signal rather than each
+  // action's toggled signal: an exclusive group emits toggled for the action
+  // being unchecked *and* the one being checked, and reverting inside the
+  // handler re-enters it. triggered fires exactly once per user action.
+  connect(modeGroup, &QActionGroup::triggered, this,
+          &MainWindow::searchModeTriggered);
 
   QMenu *updatesMenu = bar->addMenu(tr("&Updates"));
 

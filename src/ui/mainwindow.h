@@ -60,7 +60,7 @@ private slots:
     void trashResult();
     void toggleTheme();
     void onUpdateCheckFinished(app::CheckOutcome outcome);
-    void searchModeChanged();
+    void searchModeTriggered(QAction* action);
 
 private:
     void tryLoadIndex(const QString& dir);
