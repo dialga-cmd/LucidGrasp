@@ -5,6 +5,7 @@
 
 #include <QAbstractButton>
 #include <QAction>
+#include <QActionGroup>
 #include <QCheckBox>
 #include <QCloseEvent>
 #include <QColor>
@@ -36,7 +37,6 @@
 #include <QPixmap>
 #include <QProgressBar>
 #include <QPushButton>
-#include <QRadioButton>
 #include <QSet>
 #include <QSettings>
 #include <QShowEvent>
@@ -45,7 +45,6 @@
 #include <QStatusBar>
 #include <QStyleHints>
 #include <QTabWidget>
-#include <QTemporaryDir>
 #include <QTextBrowser>
 #include <QTimer>
 #include <QUrl>
@@ -560,50 +559,6 @@ MainWindow::MainWindow(QWidget *parent)
   auto *left = new QVBoxLayout(leftWidget);
   left->setContentsMargins(0, 0, 0, 0);
 
-  optionsGroup_ = new QGroupBox(QStringLiteral("Search Options"), central);
-  optionsGroup_->setObjectName(QStringLiteral("optionsGroup"));
-  auto *optionsLayout = new QVBoxLayout(optionsGroup_);
-
-  visualRadio_ = new QRadioButton(QStringLiteral("Visual Search"), optionsGroup_);
-  visualRadio_->setChecked(true);
-  visualRadio_->setToolTip(
-      QStringLiteral("Match using color, structure and keypoints"));
-  optionsLayout->addWidget(visualRadio_);
-
-  similarRadio_ = new QRadioButton(QStringLiteral("Similar Search"), optionsGroup_);
-  similarRadio_->setToolTip(
-      QStringLiteral("Remove the query background before matching"));
-  optionsLayout->addWidget(similarRadio_);
-
-  auto *modelHost = new QWidget(optionsGroup_);
-  auto *modelLayout = new QVBoxLayout(modelHost);
-  modelLayout->setContentsMargins(18, 0, 0, 0);
-  liteRadio_ = new QRadioButton(QStringLiteral("Lite model search"), modelHost);
-  liteRadio_->setEnabled(false);
-  liteRadio_->setToolTip(ui::modelDisplayName(ui::SearchModel::Lite));
-  generalRadio_ =
-      new QRadioButton(QStringLiteral("General model search"), modelHost);
-  generalRadio_->setEnabled(false);
-  generalRadio_->setToolTip(ui::modelDisplayName(ui::SearchModel::General));
-  modelLayout->addWidget(liteRadio_);
-  modelLayout->addWidget(generalRadio_);
-  optionsLayout->addWidget(modelHost);
-
-  semanticRadio_ = new QRadioButton(QStringLiteral("Semantic Search"), optionsGroup_);
-  semanticRadio_->setToolTip(
-      QStringLiteral("Match by meaning with an AI embedding model"));
-  optionsLayout->addWidget(semanticRadio_);
-
-  auto *optionsHint =
-      new QLabel(QStringLiteral("Similar and Semantic search fetch their "
-                                "model on first use when it is missing."),
-                 optionsGroup_);
-  optionsHint->setObjectName(QStringLiteral("modelHintLabel"));
-  optionsHint->setWordWrap(true);
-  optionsLayout->addWidget(optionsHint);
-
-  left->addWidget(optionsGroup_);
-
   libGroup_ = new QGroupBox(QStringLiteral("Library"), central);
   libGroup_->setObjectName(QStringLiteral("libGroup"));
   auto *libLayout = new QVBoxLayout(libGroup_);
@@ -702,22 +657,6 @@ MainWindow::MainWindow(QWidget *parent)
   connect(themeToggleBtn_, &QPushButton::clicked, this,
            &MainWindow::toggleTheme);
 
-  connect(visualRadio_, &QRadioButton::toggled, this,
-           &MainWindow::searchModeChanged);
-  connect(similarRadio_, &QRadioButton::toggled, this,
-           &MainWindow::searchModeChanged);
-  connect(liteRadio_, &QRadioButton::toggled, this,
-           &MainWindow::searchModeChanged);
-  connect(generalRadio_, &QRadioButton::toggled, this,
-           &MainWindow::searchModeChanged);
-  connect(semanticRadio_, &QRadioButton::toggled, this,
-           &MainWindow::searchModeChanged);
-  connect(similarRadio_, &QRadioButton::toggled, this,
-           [this](bool on) {
-             liteRadio_->setEnabled(on);
-             generalRadio_->setEnabled(on);
-           });
-
   results_->installEventFilter(this);
 
   updates_ = new app::UpdateChecker(this);
@@ -745,70 +684,38 @@ MainWindow::~MainWindow() {
 }
 
 MainWindow::SearchMode MainWindow::selectedMode() const {
-  if (semanticRadio_->isChecked())
-    return SearchMode::Semantic;
-  if (similarRadio_->isChecked())
-    return generalRadio_->isChecked() ? SearchMode::SimilarGeneral
-                                      : SearchMode::SimilarLite;
+  if (similarAction_ && similarAction_->isChecked())
+    return SearchMode::Similar;
   return SearchMode::Visual;
 }
 
 void MainWindow::applyModeButtons(SearchMode mode) {
   switch (mode) {
     case SearchMode::Visual:
-      visualRadio_->setChecked(true);
+      visualAction_->setChecked(true);
       break;
-    case SearchMode::SimilarLite:
-      similarRadio_->setChecked(true);
-      liteRadio_->setChecked(true);
-      break;
-    case SearchMode::SimilarGeneral:
-      similarRadio_->setChecked(true);
-      generalRadio_->setChecked(true);
-      break;
-    case SearchMode::Semantic:
-      semanticRadio_->setChecked(true);
+    case SearchMode::Similar:
+      similarAction_->setChecked(true);
       break;
   }
 }
 
 void MainWindow::searchModeChanged() {
-  auto *radio = qobject_cast<QRadioButton *>(sender());
-  if (!radio || !radio->isChecked())
-    return;
-
-  if (radio == similarRadio_) {
-    if (!liteRadio_->isChecked() && !generalRadio_->isChecked())
-      liteRadio_->setChecked(true);
-    return;
-  }
-
   const SearchMode mode = selectedMode();
   if (mode == lastAppliedMode_)
     return;
 
-  if (mode == SearchMode::Visual) {
-    bgRemover_.unload();
-    lastAppliedMode_ = mode;
-    return;
-  }
-
-  if (mode == SearchMode::Semantic) {
-    if (ui::prepareModelForSearch(ui::SearchModel::Semantic, this))
+  if (mode == SearchMode::Similar) {
+    // Selecting Similar search requires the embedding model; fetch it on
+    // first use and fall back to Visual if the download is cancelled.
+    if (ui::prepareModelForSearch(ui::SearchModel::Similar, this))
       lastAppliedMode_ = mode;
     else
       applyModeButtons(lastAppliedMode_);
     return;
   }
 
-  const ui::SearchModel want = mode == SearchMode::SimilarLite
-                                   ? ui::SearchModel::Lite
-                                   : ui::SearchModel::General;
-  if (ui::prepareModelForSearch(want, this)) {
-    lastAppliedMode_ = mode;
-  } else {
-    applyModeButtons(lastAppliedMode_);
-  }
+  lastAppliedMode_ = mode;
 }
 
 void MainWindow::buildMenus() {
@@ -828,6 +735,30 @@ void MainWindow::buildMenus() {
   QAction *quitAction = file->addAction(tr("E&xit"));
   quitAction->setShortcut(QKeySequence::Quit);
   connect(quitAction, &QAction::triggered, this, &QWidget::close);
+
+  QMenu *searchMenu = bar->addMenu(tr("&Search"));
+
+  auto *modeGroup = new QActionGroup(this);
+  modeGroup->setExclusive(true);
+
+  visualAction_ = searchMenu->addAction(tr("&Visual Search"));
+  visualAction_->setCheckable(true);
+  visualAction_->setChecked(true);
+  visualAction_->setShortcut(QKeySequence(QStringLiteral("Ctrl+1")));
+  visualAction_->setToolTip(
+      QStringLiteral("Match by color, structure and keypoints"));
+  modeGroup->addAction(visualAction_);
+  connect(visualAction_, &QAction::toggled, this,
+          &MainWindow::searchModeChanged);
+
+  similarAction_ = searchMenu->addAction(tr("&Similar Search"));
+  similarAction_->setCheckable(true);
+  similarAction_->setShortcut(QKeySequence(QStringLiteral("Ctrl+2")));
+  similarAction_->setToolTip(
+      QStringLiteral("Match by meaning with the DINOv2 embedding model"));
+  modeGroup->addAction(similarAction_);
+  connect(similarAction_, &QAction::toggled, this,
+          &MainWindow::searchModeChanged);
 
   QMenu *updatesMenu = bar->addMenu(tr("&Updates"));
 
@@ -1410,22 +1341,11 @@ void MainWindow::startSearch() {
   }
 
   const SearchMode mode = selectedMode();
-  if (mode == SearchMode::SimilarLite || mode == SearchMode::SimilarGeneral) {
-    const ui::SearchModel want = mode == SearchMode::SimilarLite
-                                     ? ui::SearchModel::Lite
-                                     : ui::SearchModel::General;
-    if (ui::checkModelStatus(want) != ui::ModelStatus::Ready &&
-        !ui::prepareModelForSearch(want, this)) {
-      statusBar()->showMessage(
-          QStringLiteral("Similar search model not ready."), 4000);
-      return;
-    }
-  } else if (mode == SearchMode::Semantic &&
-             ui::checkModelStatus(ui::SearchModel::Semantic) !=
-                 ui::ModelStatus::Ready &&
-             !ui::prepareModelForSearch(ui::SearchModel::Semantic, this)) {
+  if (mode == SearchMode::Similar &&
+      ui::checkModelStatus(ui::SearchModel::Similar) != ui::ModelStatus::Ready &&
+      !ui::prepareModelForSearch(ui::SearchModel::Similar, this)) {
     statusBar()->showMessage(
-        QStringLiteral("Semantic search model not ready."), 4000);
+        QStringLiteral("Similar search model not ready."), 4000);
     return;
   }
 
@@ -1439,7 +1359,7 @@ void MainWindow::startSearch() {
   setBusy(true);
   statusBar()->showMessage(mode == SearchMode::Visual
                                ? QStringLiteral("Searching…")
-                               : QStringLiteral("Preparing query image…"));
+                               : QStringLiteral("Setting up similarity search…"));
   searchTimer_.start();
 
   const double threshold = thresholdSpin_->value() / 100.0;
@@ -1448,37 +1368,7 @@ void MainWindow::startSearch() {
     std::vector<core::SearchResult> results;
     bool ok = false;
     QString error;
-    std::unique_ptr<QTemporaryDir> tempDir;
     try {
-      QString searchQuery = query;
-      const bool similar = mode == SearchMode::SimilarLite ||
-                           mode == SearchMode::SimilarGeneral;
-      if (similar) {
-        const ui::SearchModel want = mode == SearchMode::SimilarLite
-                                         ? ui::SearchModel::Lite
-                                         : ui::SearchModel::General;
-        const QString model = ui::modelStorePath(want);
-        if (!bgRemover_.isLoaded() || bgRemover_.modelPath() != model) {
-          QString loadError;
-          if (!bgRemover_.loadModel(model, &loadError))
-            throw std::runtime_error(
-                ("cannot load the model: " + loadError).toStdString());
-        }
-        const QImage source = core::loadImageForBackground(query);
-        if (source.isNull())
-          throw std::runtime_error("the query image could not be read");
-        QImage cutout;
-        QString bgError;
-        if (!bgRemover_.removeBackground(source, &cutout, &bgError))
-          throw std::runtime_error(bgError.toStdString());
-        tempDir = std::make_unique<QTemporaryDir>();
-        if (!tempDir->isValid())
-          throw std::runtime_error("cannot create a temporary folder");
-        searchQuery = tempDir->filePath(QStringLiteral("query_matte.png"));
-        if (!core::matteOf(cutout).save(searchQuery, "PNG"))
-          throw std::runtime_error("cannot cache the query matte");
-      }
-
       const auto progressFn = [this](int done, int total) {
         QMetaObject::invokeMethod(
             this, [this, done, total] { onSearchProgress(done, total); },
@@ -1486,17 +1376,16 @@ void MainWindow::startSearch() {
         return !cancel_.load();
       };
 
-      if (mode == SearchMode::Semantic) {
-        const QString model = ui::modelStorePath(ui::SearchModel::Semantic);
+      if (mode == SearchMode::Similar) {
+        const QString model = ui::modelStorePath(ui::SearchModel::Similar);
         if (!semantic_.isLoaded() || semantic_.modelPath() != model) {
           QString loadError;
           if (!semantic_.loadModel(model, &loadError))
             throw std::runtime_error(
-                ("cannot load the semantic model: " + loadError)
-                    .toStdString());
+                ("cannot load the model: " + loadError).toStdString());
         }
         if (!index_.hasSemanticEmbeddings()) {
-          // The cached index predates semantic search (or was built without
+          // The cached index predates Similar search (or was built without
           // the model), so rebuild it with embeddings before ranking. The
           // rebuild takes the first 60% of the progress bar.
           const QString rebuildRoot = index_.root();
@@ -1512,19 +1401,16 @@ void MainWindow::startSearch() {
           ok = true;
         }
         if (ok) {
-          const auto semanticProgress = [&progressFn](int done, int total) {
+          const auto similarProgress = [&progressFn](int done, int total) {
             if (total <= 0)
               return true;
             return progressFn(60 + int(qint64(done) * 40 / total), 100);
           };
           ok = index_.searchSemantic(query, semantic_, threshold, results,
-                                     semanticProgress);
+                                     similarProgress);
         }
-      } else if (similar) {
-        ok = index_.searchWithObjectRerank(searchQuery, bgRemover_, threshold,
-                                           results, progressFn);
       } else {
-        ok = index_.searchFile(searchQuery, threshold, results, progressFn);
+        ok = index_.searchFile(query, threshold, results, progressFn);
       }
     } catch (const std::exception &e) {
       ok = false;
@@ -1748,8 +1634,10 @@ void MainWindow::updateActions() {
     indexAction_->setEnabled(!busy);
   if (queryAction_)
     queryAction_->setEnabled(!busy);
-  if (optionsGroup_)
-    optionsGroup_->setEnabled(!busy);
+  if (visualAction_)
+    visualAction_->setEnabled(!busy);
+  if (similarAction_)
+    similarAction_->setEnabled(!busy);
 }
 
 bool MainWindow::systemPrefersDark() const {
@@ -1891,20 +1779,6 @@ QSpinBox::up-button, QSpinBox::down-button {
 QSpinBox::up-button { subcontrol-position: top right; }
 QSpinBox::down-button { subcontrol-position: bottom right; }
 QSpinBox::up-button:hover, QSpinBox::down-button:hover { background: @hover; }
-
-QRadioButton {
-    background: transparent; color: @text;
-    spacing: 6px; padding: 2px 0;
-}
-QRadioButton:disabled { color: @muted; }
-QRadioButton::indicator {
-    width: 15px; height: 15px; border-radius: 8px;
-    border: 1px solid @border; background: @field;
-}
-QRadioButton::indicator:hover { border-color: @accent; }
-QRadioButton::indicator:checked { background: @accent; border-color: @accent; }
-
-QLabel#modelHintLabel { color: @muted; font-size: 12px; }
 
 QPushButton {
     background: @field; border: 1px solid @border; border-radius: 6px;

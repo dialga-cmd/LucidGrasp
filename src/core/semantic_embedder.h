@@ -16,11 +16,10 @@ class Session;
 
 namespace core {
 
-// DINOv2-small (int8) semantic embedding via ONNX Runtime. An embedding is a
-// compact feature vector that captures *what* is in the image rather than its
-// pixels; cosine similarity between two embeddings measures how related the
-// contents are. Backgrounds barely matter for an embedding, so they are
-// computed on the plain photo and no background removal is involved.
+// DINOv2-small (int8) embedding via ONNX Runtime, used by Similar search. An
+// embedding is a compact feature vector that captures *what* is in the image
+// rather than its pixels; cosine similarity between two embeddings measures
+// how related the contents are. The model runs on the plain photo.
 class SemanticEmbedder {
 public:
   static constexpr int kDim = 384;

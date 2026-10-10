@@ -1,7 +1,6 @@
 #include "selftest.h"
 
 #include "app/update_checker.h"
-#include "core/background_remover.h"
 #include "core/features.h"
 #include "core/index.h"
 
@@ -728,115 +727,7 @@ int runSelfTest()
         }
     }
 
-    std::printf("Case 12 — background-removal preprocessing:\n");
-    {
-        QImage red(64, 48, QImage::Format_RGB32);
-        red.fill(QColor(255, 0, 0));
-        std::vector<float> tensor;
-        if (!core::BackgroundRemover::loadInput(red, 32, &tensor) ||
-            tensor.size() != size_t(3) * 32 * 32) {
-            std::printf("FAIL: tensor sizing for a solid red image\n\n");
-            ++failures;
-        } else {
-            const float mean[3] = {0.485f, 0.456f, 0.406f};
-            const float stdv[3] = {0.229f, 0.224f, 0.225f};
-            const float expect[3] = {
-                (1.0f - mean[0]) / stdv[0],
-                (0.0f - mean[1]) / stdv[1],
-                (0.0f - mean[2]) / stdv[2],
-            };
-            bool match = true;
-            for (int c = 0; c < 3 && match; ++c)
-                for (size_t i = 0; i < size_t(32) * 32; ++i) {
-                    const float got = tensor[c * size_t(32) * 32 + i];
-                    if (std::fabs(got - expect[c]) > 1e-3f) {
-                        match = false;
-                        break;
-                    }
-                }
-            if (!match) {
-                std::printf("FAIL: normalized pixel values wrong\n\n");
-                ++failures;
-            } else {
-                std::printf("PASS: RGB->NCHW normalization matches the "
-                            "BiRefNet convention\n\n");
-            }
-        }
-
-        QImage black(32, 32, QImage::Format_RGB32);
-        black.fill(Qt::black);
-        std::vector<float> t2;
-        if (core::BackgroundRemover::loadInput(black, 32, &t2)) {
-            std::printf("FAIL: a fully black image produced a tensor\n\n");
-            ++failures;
-        } else {
-            std::printf("PASS: a fully black image is rejected\n\n");
-        }
-
-        core::BackgroundRemover remover;
-        QImage cutout;
-        QString noModelError;
-        const bool ranNoModel =
-            remover.removeBackground(red, &cutout, &noModelError);
-        if (ranNoModel) {
-            std::printf("FAIL: inference without a model reported success\n\n");
-            ++failures;
-        } else {
-            std::printf("PASS: inference without a model fails cleanly\n\n");
-        }
-    }
-
-    std::printf("Case 13 — cutout matte compositing:\n");
-    {
-        QImage cutout(2, 2, QImage::Format_ARGB32);
-        cutout.setPixelColor(0, 0, QColor(255, 0, 0, 255));
-        cutout.setPixelColor(1, 0, QColor(0, 255, 0, 128));
-        cutout.setPixelColor(0, 1, QColor(0, 0, 255, 0));
-        cutout.setPixelColor(1, 1, QColor(255, 255, 255, 255));
-
-        const QImage matte = core::matteOf(cutout);
-        int bad = 0;
-        if (matte.isNull() || matte.width() != 2 || matte.height() != 2 ||
-            matte.format() != QImage::Format_RGB888) {
-            std::printf("FAIL: matte size or format\n\n");
-            ++failures;
-        } else {
-            if (matte.pixelColor(0, 0) != QColor(255, 0, 0)) {
-                std::printf("FAIL: opaque pixel lost its color\n");
-                ++bad;
-            }
-            const QColor gray = matte.pixelColor(0, 1);
-            if (gray != QColor(128, 128, 128)) {
-                std::printf("FAIL: transparent pixel did not become gray "
-                            "(got %d,%d,%d)\n",
-                            gray.red(), gray.green(), gray.blue());
-                ++bad;
-            }
-            const QColor blend = matte.pixelColor(1, 0);
-            const int dr = std::abs(blend.red() - 64);
-            const int dg = std::abs(blend.green() - 191);
-            const int db = std::abs(blend.blue() - 64);
-            if (dr > 1 || dg > 1 || db > 1) {
-                std::printf("FAIL: half-transparent pixel not blended "
-                            "(got %d,%d,%d)\n",
-                            blend.red(), blend.green(), blend.blue());
-                ++bad;
-            }
-            if (matte.pixelColor(1, 1) != QColor(255, 255, 255)) {
-                std::printf("FAIL: opaque white changed\n");
-                ++bad;
-            }
-            if (bad == 0) {
-                std::printf("PASS: matte keeps the foreground and flattens "
-                            "the background to gray\n\n");
-            } else {
-                std::printf("\n");
-                ++failures;
-            }
-        }
-    }
-
-    std::printf("Case 14 — semantic-embedder preprocessing:\n");
+    std::printf("Case 12 — similarity-embedder preprocessing:\n");
     {
         QImage gray(640, 480, QImage::Format_RGB32);
         gray.fill(QColor(128, 128, 128));
@@ -866,7 +757,7 @@ int runSelfTest()
                     }
                 }
             if (!match) {
-                std::printf("FAIL: semantic center-crop/normalization is "
+                std::printf("FAIL: similarity center-crop/normalization is "
                             "wrong\n\n");
                 ++failures;
             } else {
@@ -876,38 +767,38 @@ int runSelfTest()
         }
     }
 
-    std::printf("Case 15 — semantic search without a model:\n");
+    std::printf("Case 13 — similarity search without a model:\n");
     {
         core::SemanticEmbedder noModel;
         std::vector<core::SearchResult> none;
         if (index.searchSemantic(qExact, noModel, 0.0, none)) {
-            std::printf("FAIL: semantic search without a model reported "
+            std::printf("FAIL: similarity search without a model reported "
                         "success\n\n");
             ++failures;
         } else {
-            std::printf("PASS: semantic search without a model fails "
+            std::printf("PASS: similarity search without a model fails "
                         "cleanly\n\n");
         }
     }
 
-    std::printf("Case 16 — semantic embedding end to end:\n");
+    std::printf("Case 14 — similarity embedding end to end:\n");
     {
         const QString modelPath = core::defaultSemanticModelPath();
         if (modelPath.isEmpty()) {
-            std::printf("SKIP: no semantic model installed (run "
+            std::printf("SKIP: no similarity model installed (run "
                         "./fetch-model.sh semantic)\n\n");
         } else {
             core::SemanticEmbedder embedder;
             QString error;
             if (!embedder.loadModel(modelPath, &error)) {
-                std::printf("FAIL: cannot load the semantic model: %s\n\n",
+                std::printf("FAIL: cannot load the similarity model: %s\n\n",
                             qPrintable(error));
                 ++failures;
             } else {
                 core::ImageIndex semIndex;
                 if (!semIndex.build(lib, {}, &embedder) ||
                     !semIndex.hasSemanticEmbeddings()) {
-                    std::printf("FAIL: semantic index build produced no "
+                    std::printf("FAIL: similarity index build produced no "
                                 "embeddings\n\n");
                     ++failures;
                 } else {
@@ -936,15 +827,15 @@ int runSelfTest()
                         sres[copyRank].score > 0.9;
 
                     if (!roundTrip) {
-                        std::printf("FAIL: semantic index round-trip lost "
+                        std::printf("FAIL: similarity index round-trip lost "
                                     "the embeddings\n\n");
                         ++failures;
                     } else if (!searched || !strongTop || !bothStrong) {
                         std::printf("FAIL: byte-identical copies did not "
-                                    "dominate the semantic ranking\n\n");
+                                    "dominate the similarity ranking\n\n");
                         ++failures;
                     } else {
-                        std::printf("PASS: semantic index round-trips and "
+                        std::printf("PASS: similarity index round-trips and "
                                     "byte-identical copies score "
                                     "%.3f/%.3f\n\n",
                                     sres[origRank].score, sres[copyRank].score);

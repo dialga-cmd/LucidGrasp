@@ -1,7 +1,6 @@
 #pragma once
 
 #include "app/update_checker.h"
-#include "core/background_remover.h"
 #include "core/index.h"
 
 #include <atomic>
@@ -25,7 +24,6 @@ class QListWidget;
 class QListWidgetItem;
 class QPushButton;
 class QProgressBar;
-class QRadioButton;
 class QShowEvent;
 class QSpinBox;
 
@@ -36,15 +34,12 @@ public:
     explicit MainWindow(QWidget* parent = nullptr);
     ~MainWindow() override;
 
-    // Search mode selected in the "Search Options" panel. Visual is the
-    // plain feature match; Similar runs the query through background removal
-    // first, using one of the two model variants; Semantic ranks by meaning
-    // with the embedding model.
+    // Search mode selected from the "Search" menu. Visual is the plain
+    // feature match; Similar ranks by meaning with the DINOv2 embedding
+    // model.
     enum class SearchMode {
         Visual,
-        SimilarLite,
-        SimilarGeneral,
-        Semantic,
+        Similar,
     };
 
 protected:
@@ -108,12 +103,8 @@ private:
 
     QGroupBox* libGroup_ = nullptr;
     QGroupBox* queryGroup_ = nullptr;
-    QGroupBox* optionsGroup_ = nullptr;
-    QRadioButton* visualRadio_ = nullptr;
-    QRadioButton* similarRadio_ = nullptr;
-    QRadioButton* liteRadio_ = nullptr;
-    QRadioButton* generalRadio_ = nullptr;
-    QRadioButton* semanticRadio_ = nullptr;
+    QAction* visualAction_ = nullptr;
+    QAction* similarAction_ = nullptr;
     SearchMode lastAppliedMode_ = SearchMode::Visual;
     QPalette desktopPalette_;
     bool panelsSized_ = false;
@@ -146,6 +137,5 @@ private:
     QElapsedTimer searchTimer_;
     bool indexing_ = false;
     bool searching_ = false;
-    core::BackgroundRemover bgRemover_;
     core::SemanticEmbedder semantic_;
 };

@@ -4,18 +4,12 @@
 
 #include <QApplication>
 #include <QCoreApplication>
-#include <QDir>
-#include <QDirIterator>
 #include <QElapsedTimer>
 #include <QFileInfo>
 #include <QGuiApplication>
-#include <QImage>
-#include <QImageReader>
 #include <QSettings>
 #include <QTextStream>
-#include <QTemporaryDir>
 
-#include "core/background_remover.h"
 #include "core/index.h"
 #include "core/semantic_embedder.h"
 #include "selftest.h"
@@ -32,19 +26,13 @@ void printUsage()
         "  LucidGrasp                            launch GUI\n"
         "  LucidGrasp --cli <library> <query> [threshold%%]\n"
         "      threshold is 0-100, default 50\n"
-        "      headless search; reuses cache if present\n"
+        "      headless visual search; reuses cache if present\n"
         "  LucidGrasp --cli --reindex <library> <query> [threshold%%]\n"
         "      force a fresh index\n"
         "  LucidGrasp --selftest\n"
         "      build a synthetic corpus and verify ranking\n"
-        "  LucidGrasp --object-search [--reindex] [--rerank] <library> <query> [threshold%%]\n"
-        "      find the same subject regardless of background; <library>\n"
-        "      should hold matte cutouts, and the query image is stripped\n"
-        "      of its background automatically;\n"
-        "      --rerank additionally trims the strongest matches and compares\n"
-        "      them matte-to-matte (expensive, but only a few images)\n"
-        "  LucidGrasp --semantic [--reindex] <library> <query> [threshold%%]\n"
-        "      meaning-based search powered by the DINOv2 embedding model;\n"
+        "  LucidGrasp --similar [--reindex] <library> <query> [threshold%%]\n"
+        "      similarity search powered by the DINOv2 embedding model;\n"
         "      ranks the library by how related the image content is rather\n"
         "      than by raw pixel similarity; the model defaults to the\n"
         "      standard model location (see ./fetch-model.sh semantic)\n"
@@ -63,9 +51,8 @@ bool parseThreshold(const QString& text, double* threshold)
     return true;
 }
 
-int runSimilarSearch(const QString& library, const QString& query,
-                     double threshold, bool reindex,
-                     core::BackgroundRemover* remover = nullptr)
+int runVisualSearch(const QString& library, const QString& query,
+                    double threshold, bool reindex)
 {
     core::ImageIndex index;
     QElapsedTimer timer;
@@ -118,13 +105,7 @@ int runSimilarSearch(const QString& library, const QString& query,
         }
         return true;
     };
-    bool searched = false;
-    if (remover) {
-        searched = index.searchWithObjectRerank(query, *remover, threshold,
-                                                results, report);
-    } else {
-        searched = index.searchFile(query, threshold, results, report);
-    }
+    bool searched = index.searchFile(query, threshold, results, report);
     if (!searched) {
         std::fprintf(stderr, "error: cannot read query '%s'\n",
                      qPrintable(query));
@@ -178,103 +159,16 @@ int runCli(const QStringList& args)
         return 2;
     }
 
-    return runSimilarSearch(rest[0], rest[1], threshold, reindex);
+    return runVisualSearch(rest[0], rest[1], threshold, reindex);
 }
 
-int runObjectSearch(const QStringList& args)
-{
-    bool reindex = false;
-    bool rerank = false;
-    QStringList rest;
-    bool seen = false;
-    for (int i = 0; i < args.size(); ++i) {
-        if (args[i] == QLatin1String("--object-search"))
-            seen = true;
-        else if (seen && args[i] == QLatin1String("--reindex"))
-            reindex = true;
-        else if (seen && args[i] == QLatin1String("--rerank"))
-            rerank = true;
-        else if (seen)
-            rest.append(args[i]);
-    }
-
-    if (rest.size() < 2 || rest.size() > 3) {
-        printUsage();
-        return 2;
-    }
-
-    const QString library = rest[0];
-    double threshold = 0.5;
-    if (rest.size() == 3 && !parseThreshold(rest[2], &threshold)) {
-        std::fprintf(stderr,
-                     "error: threshold must be a number from 0 to 100, "
-                     "got '%s'\n",
-                     qPrintable(rest[2]));
-        return 2;
-    }
-
-    QString model = core::defaultModelPath();
-    if (model.isEmpty()) {
-        std::fprintf(stderr,
-                     "error: no background model found; run ./fetch-model.sh "
-                     "or set LUCIDGRASP_BG_MODEL\n");
-        return 1;
-    }
-
-    core::BackgroundRemover remover;
-    QString error;
-    QElapsedTimer timer;
-    timer.start();
-    if (!remover.loadModel(model, &error)) {
-        std::fprintf(stderr, "error: cannot load model: %s\n",
-                     qPrintable(error));
-        return 1;
-    }
-
-    const QImage source = core::loadImageForBackground(rest[1]);
-    if (source.isNull()) {
-        std::fprintf(stderr, "error: cannot read query '%s'\n",
-                     qPrintable(rest[1]));
-        return 1;
-    }
-
-    QImage cutout;
-    if (!remover.removeBackground(source, &cutout, &error)) {
-        std::fprintf(stderr, "error: %s\n", qPrintable(error));
-        return 1;
-    }
-
-    QTemporaryDir tempDir;
-    if (!tempDir.isValid()) {
-        std::fprintf(stderr, "error: cannot create a temporary folder\n");
-        return 1;
-    }
-    const QString mattePath =
-        tempDir.filePath(QStringLiteral("query_matte.png"));
-    if (!core::matteOf(cutout).save(mattePath, "PNG")) {
-        std::fprintf(stderr, "error: cannot cache the query matte\n");
-        return 1;
-    }
-
-    const qint64 stripMs = timer.elapsed();
-    std::printf("strip    : %lld ms (query background removed)\n",
-                static_cast<long long>(stripMs));
-
-    if (rerank) {
-        std::printf("rerank   : on (top candidates trimmed and re-scored)\n");
-        return runSimilarSearch(library, mattePath, threshold, reindex,
-                                &remover);
-    }
-    return runSimilarSearch(library, mattePath, threshold, reindex);
-}
-
-int runSemanticSearch(const QStringList& args)
+int runSimilarSearch(const QStringList& args)
 {
     bool reindex = false;
     QStringList rest;
     bool seen = false;
     for (int i = 0; i < args.size(); ++i) {
-        if (args[i] == QLatin1String("--semantic"))
+        if (args[i] == QLatin1String("--similar"))
             seen = true;
         else if (seen && args[i] == QLatin1String("--reindex"))
             reindex = true;
@@ -301,7 +195,7 @@ int runSemanticSearch(const QStringList& args)
     const QString model = core::defaultSemanticModelPath();
     if (model.isEmpty()) {
         std::fprintf(stderr,
-                     "error: no semantic model found; run ./fetch-model.sh "
+                     "error: no similarity model found; run ./fetch-model.sh "
                      "semantic or set LUCIDGRASP_SEMANTIC_MODEL\n");
         return 1;
     }
@@ -311,7 +205,7 @@ int runSemanticSearch(const QStringList& args)
     QElapsedTimer timer;
     timer.start();
     if (!embedder.loadModel(model, &error)) {
-        std::fprintf(stderr, "error: cannot load the semantic model: %s\n",
+        std::fprintf(stderr, "error: cannot load the similarity model: %s\n",
                      qPrintable(error));
         return 1;
     }
@@ -434,14 +328,9 @@ int main(int argc, char* argv[])
         return runCli(args);
     }
 
-    if (args.contains(QLatin1String("--semantic"))) {
+    if (args.contains(QLatin1String("--similar"))) {
         QCoreApplication app(argc, argv);
-        return runSemanticSearch(args);
-    }
-
-    if (args.contains(QLatin1String("--object-search"))) {
-        QCoreApplication app(argc, argv);
-        return runObjectSearch(args);
+        return runSimilarSearch(args);
     }
 
 #if defined(Q_OS_LINUX)

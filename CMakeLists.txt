@@ -22,8 +22,6 @@ set(SOURCES
     src/selftest.cpp
     src/app/update_checker.h
     src/app/update_checker.cpp
-    src/core/background_remover.h
-    src/core/background_remover.cpp
     src/core/cv_matcher.h
     src/core/cv_matcher.cpp
     src/core/features.h

@@ -5,13 +5,14 @@ before 1.2.4 is on the [GitHub Releases](https://github.com/dialga-cmd/LucidGras
 
 ## [Unreleased]
 
-- Added a new **Semantic Search** mode powered by the DINOv2-small embedding
-  model. Instead of comparing pixels, it ranks the library by how related the
-  image *content* is: each image is turned into a compact meaning descriptor
-  and results are the closest descriptors. The model (about 24 MB) is not
-  shipped — it is downloaded on first use, like the similar-search models, and
-  the semantic index is built automatically the first time a semantic search
-  runs. The model is fetched with `./fetch-model.sh semantic`.
+- **Similar Search** now runs on the DINOv2-small embedding model. Instead of
+  comparing pixels, it ranks the library by how related the image *content* is:
+  each image is turned into a compact descriptor and the results are the
+  closest descriptors. The model (about 24 MB) is not shipped — it is
+  downloaded on first use, and the embedding data is added to the index
+  automatically the first time a Similar search runs. The model is fetched with
+  `./fetch-model.sh semantic`. Visual and Similar search are chosen from the
+  new **Search** menu in the menu bar.
 - The update dialog now shows the **complete release notes** instead of
   truncating them after 700 characters, and renders them as **Markdown**
   (headings, lists, links, bold) in a scrollable view.
