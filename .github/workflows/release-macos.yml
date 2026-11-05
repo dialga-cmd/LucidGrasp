@@ -1,0 +1,187 @@
+name: Build macOS Release
+
+on:
+  release:
+    types: [published]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    runs-on: macos-15-intel
+    timeout-minutes: 45
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+
+    - name: Install Qt6
+      uses: jurplel/install-qt-action@v4
+      with:
+        version: '6.8.3'
+        host: 'mac'
+        target: 'desktop'
+
+    - name: Install OpenCV
+      run: |
+        brew install opencv@4
+
+    - name: Generate app icon
+      run: |
+        chmod +x make-icns.sh
+        ./make-icns.sh lucidgrasp.png lucidgrasp.icns
+        test -s lucidgrasp.icns
+
+    - name: Build Project
+      run: |
+        cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+          -DOpenCV_DIR="$(brew --prefix opencv@4)/lib/cmake/opencv4" \
+          -DLUCIDGRASP_ICNS="$PWD/lucidgrasp.icns"
+        cmake --build build -j$(sysctl -n hw.ncpu)
+
+    - name: Self Test
+      run: |
+        QT_QPA_PLATFORM=offscreen ./build/LucidGrasp.app/Contents/MacOS/LucidGrasp --selftest
+        if [ $? -ne 0 ]; then
+          echo "Self-test failed"
+          exit 1
+        fi
+
+    - name: Bundle Dependencies
+      if: github.event_name == 'release'
+      run: |
+        APP=build/LucidGrasp.app
+        MACOS_DIR="$APP/Contents/MacOS"
+        FRAMEWORKS="$APP/Contents/Frameworks"
+
+        if [ ! -s "$APP/Contents/Resources/lucidgrasp.icns" ]; then
+          echo "ERROR: the bundle carries no icon."
+          echo "  Contents/Resources:"
+          ls -la "$APP/Contents/Resources" 2>/dev/null || echo "  (does not exist)"
+          echo "  CFBundleIconFile is: $(plutil -extract CFBundleIconFile raw "$APP/Contents/Info.plist" 2>/dev/null || echo '(unset)')"
+          exit 1
+        fi
+        echo "Icon: $(wc -c <"$APP/Contents/Resources/lucidgrasp.icns" | tr -d ' ') bytes"
+
+        if [ -z "$QT_ROOT_DIR" ]; then
+          echo "ERROR: QT_ROOT_DIR is unset; the Qt install step did not run"
+          exit 1
+        fi
+        if [ ! -x "$QT_ROOT_DIR/bin/macdeployqt" ]; then
+          echo "ERROR: no macdeployqt at $QT_ROOT_DIR/bin/macdeployqt"
+          ls "$QT_ROOT_DIR/bin" 2>/dev/null || echo "(no bin directory either)"
+          exit 1
+        fi
+        "$QT_ROOT_DIR/bin/macdeployqt" "$APP" -no-strip
+
+        mkdir -p "$FRAMEWORKS"
+
+        OT_DYLIBS=$(otool -L "$MACOS_DIR/LucidGrasp" \
+          | tail -n +2 \
+          | awk '{print $1}' \
+          | grep -E '^/opt/homebrew|^/usr/local' \
+          || true)
+
+        for lib in $OT_DYLIBS; do
+          base=$(basename "$lib")
+          if [ ! -f "$FRAMEWORKS/$base" ]; then
+            cp -L "$lib" "$FRAMEWORKS/$base"
+          fi
+          install_name_tool -change "$lib" "@rpath/$base" \
+            "$MACOS_DIR/LucidGrasp"
+        done
+
+        for dylib in "$FRAMEWORKS"/libopencv*.dylib; do
+          [ -e "$dylib" ] || continue
+          for dep in $(otool -L "$dylib" | tail -n +2 | awk '{print $1}' \
+                       | grep -E '^/opt/homebrew|^/usr/local' || true); do
+            dbase=$(basename "$dep")
+            if [ ! -f "$FRAMEWORKS/$dbase" ]; then
+              cp -L "$dep" "$FRAMEWORKS/$dbase"
+            fi
+            install_name_tool -change "$dep" "@rpath/$dbase" "$dylib"
+          done
+        done
+
+        for dylib in "$FRAMEWORKS"/libopencv*.dylib; do
+          [ -e "$dylib" ] || continue
+          install_name_tool -id "@rpath/$(basename "$dylib")" "$dylib" \
+            || true
+        done
+
+        install_name_tool -add_rpath "@executable_path/../Frameworks" \
+          "$MACOS_DIR/LucidGrasp" 2>/dev/null || true
+
+        if otool -L "$MACOS_DIR/LucidGrasp" "$FRAMEWORKS"/*.dylib 2>/dev/null \
+           | grep -qE '^/opt/homebrew|^/usr/local'; then
+          echo "ERROR: absolute Homebrew paths remain in the bundle:"
+          otool -L "$MACOS_DIR/LucidGrasp" "$FRAMEWORKS"/*.dylib 2>/dev/null \
+            | grep -E '^/opt/homebrew|^/usr/local'
+          exit 1
+        fi
+        echo "No absolute Homebrew paths remain."
+
+        codesign --force --deep --sign - "$APP"
+
+    - name: Create DMG
+      if: github.event_name == 'release'
+      run: |
+        APP=build/LucidGrasp.app
+        STAGE=build/dmg
+        rm -rf "$STAGE"
+        mkdir -p "$STAGE"
+
+        cp -R "$APP" "$STAGE/"
+
+        ln -s /Applications "$STAGE/Applications"
+
+        VERSION=$(grep '^CMAKE_PROJECT_VERSION:STATIC=' build/CMakeCache.txt \
+          | cut -d= -f2)
+        if [ -z "$VERSION" ]; then
+          echo "ERROR: CMAKE_PROJECT_VERSION not found in CMakeCache.txt"
+          grep VERSION build/CMakeCache.txt || true
+          exit 1
+        fi
+        echo "Packaging version: $VERSION"
+
+        DMG="lucidgrasp-macos-${VERSION}.dmg"
+
+        for attempt in 1 2 3 4 5; do
+          if hdiutil create \
+            -volname "LucidGrasp ${VERSION}" \
+            -srcfolder "$STAGE" \
+            -ov \
+            -format UDZO \
+            "$DMG"; then
+            break
+          fi
+          if [ "$attempt" -eq 5 ]; then
+            echo "ERROR: hdiutil create failed5 times"
+            grep VERSION build/CMakeCache.txt || true
+            exit 1
+          fi
+          echo "hdiutil create failed (attempt $attempt), retrying in 10s"
+          rm -f "$DMG"
+          sleep 10
+        done
+
+        hdiutil attach "$DMG" -nobrowse -mountpoint /tmp/lucidgrasp-verify
+        if [ ! -d /tmp/lucidgrasp-verify/LucidGrasp.app ]; then
+          echo "ERROR: the app is not at the root of the mounted image"
+          ls -la /tmp/lucidgrasp-verify
+          hdiutil detach /tmp/lucidgrasp-verify || true
+          exit 1
+        fi
+        plutil -lint /tmp/lucidgrasp-verify/LucidGrasp.app/Contents/Info.plist
+        hdiutil detach /tmp/lucidgrasp-verify
+
+        ls -lh "$DMG"
+
+    - name: Upload Release Asset
+      if: github.event_name == 'release'
+      uses: softprops/action-gh-release@v3
+      with:
+        files: lucidgrasp-macos-*.dmg

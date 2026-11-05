@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(LucidGrasp VERSION 1.2.2 LANGUAGES CXX)
+project(LucidGrasp VERSION 1.2.5 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -8,8 +8,10 @@ set(CMAKE_AUTOMOC ON)
 find_package(Qt6 REQUIRED COMPONENTS Widgets Network)
 find_package(Threads REQUIRED)
 
-# The repository the update checker polls, overridable at configure time for
-# forks and local testing.
+if(UNIX AND NOT APPLE)
+    find_package(Qt6 REQUIRED COMPONENTS DBus)
+endif()
+
 set(LUCIDGRASP_REPO "dialga-cmd/LucidGrasp"
     CACHE STRING "GitHub owner/repo that the update checker queries")
 
@@ -35,9 +37,10 @@ set(SOURCES
     src/ui/mainwindow.cpp
     src/ui/key_entry_dialog.h
     src/ui/key_entry_dialog.cpp
+    src/ui/file_actions.h
+    src/ui/file_actions.cpp
 )
 
-# On Windows, embed the application icon into the executable
 if(WIN32)
     list(APPEND SOURCES lucidgrasp.rc)
 endif()
@@ -49,11 +52,10 @@ find_package(OpenCV REQUIRED)
 target_link_libraries(LucidGrasp PRIVATE ${OpenCV_LIBS})
 target_link_libraries(LucidGrasp PRIVATE Qt6::Widgets Qt6::Network Threads::Threads)
 
-# One place to bump a release. main.cpp used to carry a literal version string
-# of its own, which is exactly the kind of drift that makes an update checker
-# report a phantom update on every launch for every user; the tag, this
-# definition and the shipped binary now have to agree or the checker falls
-# silent instead of lying.
+if(UNIX AND NOT APPLE)
+    target_link_libraries(LucidGrasp PRIVATE Qt6::DBus)
+endif()
+
 target_compile_definitions(LucidGrasp PRIVATE
     LUCIDGRASP_VERSION="${PROJECT_VERSION}"
     LUCIDGRASP_REPO="${LUCIDGRASP_REPO}"
@@ -65,9 +67,40 @@ else()
     target_compile_options(LucidGrasp PRIVATE -Wall -Wextra)
 endif()
 
-# Linux system installation
+set(MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.in")
+
+if(APPLE)
+    set(MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}")
+
+    set(LUCIDGRASP_ICNS "${CMAKE_CURRENT_SOURCE_DIR}/lucidgrasp.icns"
+        CACHE FILEPATH "Path to the macOS .icns; see make-icns.sh")
+
+    set_target_properties(LucidGrasp PROPERTIES
+        MACOSX_BUNDLE TRUE
+        MACOSX_BUNDLE_BUNDLE_NAME "LucidGrasp"
+        MACOSX_BUNDLE_GUI_IDENTIFIER "local.lucidgrasp.LucidGrasp"
+    )
+
+    if(EXISTS "${LUCIDGRASP_ICNS}")
+        set_source_files_properties("${LUCIDGRASP_ICNS}"
+            PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+        target_sources(LucidGrasp PRIVATE "${LUCIDGRASP_ICNS}")
+        set_target_properties(LucidGrasp PROPERTIES
+            MACOSX_BUNDLE_ICON_FILE "lucidgrasp.icns")
+    else()
+        message(WARNING
+            "lucidgrasp.icns not found at ${LUCIDGRASP_ICNS}; the bundle will "
+            "have no icon. Run make-icns.sh to generate it. This is "
+            "expected for a local build and not for a release.")
+    endif()
+endif()
+
 if(UNIX AND NOT APPLE)
     install(TARGETS LucidGrasp DESTINATION bin)
-    install(FILES lucidgrasp.desktop DESTINATION share/applications)
-    install(FILES lucidgrasp.png DESTINATION share/icons/hicolor/256x256/apps RENAME lucidgrasp.png)
+    install(FILES io.github.dialga_cmd.LucidGrasp.desktop DESTINATION share/applications)
+    install(FILES io.github.dialga_cmd.LucidGrasp.metainfo.xml DESTINATION share/metainfo)
+    install(FILES lucidgrasp.png DESTINATION share/icons/hicolor/256x256/apps RENAME io.github.dialga_cmd.LucidGrasp.png)
+    install(FILES LICENSE README.md PRIVACY.md TERMS.md DISCLAIMER.md
+            ACCEPTABLE_USE.md LEGAL.md CHANGELOG.md
+            DESTINATION share/doc/lucidgrasp)
 endif()

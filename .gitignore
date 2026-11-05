@@ -1,9 +1,13 @@
-# Build directories and files
 build/
+build-dir/
+build-stripped/
+.flatpak-builder/
+.cache/
 compile_commands.json
-CMakeUserPresets.json
+
 CMakeCache.txt
 CMakeFiles/
+CMakeUserPresets.json
 Makefile
 *.cmake
 *.o
@@ -13,7 +17,6 @@ Makefile
 *.dll
 *.exe
 
-# IDE and Editor folders
 .vscode/
 .idea/
 *.swp
@@ -21,8 +24,10 @@ Makefile
 *~
 .DS_Store
 
-# Application data
 .image_search_index.bin
+*cache
+node_modules/
+.npm/
 
 # Local secrets for the surface-scan providers (never commit API keys)
 .env
@@ -31,16 +36,16 @@ providers.ini
 secrets.ini
 *.key
 
-# Brag video output
-brag-output/
-
 # Third-party libraries (downloaded/extracted)
 third_party/
-
-# Machine Learning models (large files)
 models/
 *.onnx
 *.pt
 *.bin
 *.fix*
-*cache
+
+# Brag video output
+brag-output/
+
+Thumbs.db
+ehthumbs.db

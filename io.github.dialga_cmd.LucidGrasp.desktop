@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=LucidGrasp
+GenericName=Image Search Engine
+Comment=High-performance image search and similarity matching
+Exec=LucidGrasp
+Icon=io.github.dialga_cmd.LucidGrasp
+StartupWMClass=LucidGrasp
+Categories=Graphics;
+Terminal=false
+MimeType=image/png;image/jpeg;
+X-MultipleArgs=false

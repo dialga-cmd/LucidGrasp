@@ -6,6 +6,8 @@
 #include <QCoreApplication>
 #include <QElapsedTimer>
 #include <QFileInfo>
+#include <QGuiApplication>
+#include <QSettings>
 #include <QTextStream>
 
 #include "core/index.h"
@@ -27,12 +29,14 @@ void printUsage()
         "  LucidGrasp --cli --reindex <library> <query> [threshold%%]\n"
         "      force a fresh index\n"
         "  LucidGrasp --selftest\n"
-        "      build a synthetic corpus and verify ranking\n");
+        "      build a synthetic corpus and verify ranking\n"
+        "  LucidGrasp --reset-legal-agreement\n"
+        "      clear the stored first-run agreement; the Welcome\n"
+        "      dialog is shown again and must be agreed to enter\n");
 }
 
 int runCli(const QStringList& args)
 {
-    // args[0] = program, args[1] = --cli
     bool reindex = false;
     QStringList rest;
     for (int i = 2; i < args.size(); ++i) {
@@ -49,10 +53,6 @@ int runCli(const QStringList& args)
 
     const QString library = rest[0];
     const QString query = rest[1];
-    // Strict parse. toDouble() alone silently turns "abc" into 0.0, which
-    // reads as "threshold 0% — return every image in the library", and a value
-    // outside 0-100 would be passed through to the search unclamped. Reject
-    // both instead of guessing what the user meant.
     double threshold = 0.5;
     if (rest.size() == 3) {
         bool parsed = false;
@@ -82,9 +82,6 @@ int runCli(const QStringList& args)
     } else {
         int lastPct = -1;
         const bool built = index.build(library, [&](const core::BuildProgress& p) {
-            // total == 0 means the file count is still being discovered.
-            // done * 100 in int overflows past ~21.4M files; the percentage is
-            // the only use, so the guard lives on this one expression.
             const int pct = p.total > 0
                                 ? int(qint64(p.done) * 100 / p.total)
                                 : 0;
@@ -102,7 +99,6 @@ int runCli(const QStringList& args)
                          qPrintable(library));
             return 1;
         }
-        // A read-only or missing cache directory must not pass silently.
         if (!index.save(cache))
             std::fprintf(stderr, "warning: could not write index cache '%s'\n",
                          qPrintable(cache));
@@ -151,18 +147,13 @@ int runCli(const QStringList& args)
     return 0;
 }
 
-} // namespace
+}
 
 int main(int argc, char* argv[])
 {
-    // Must be set before any index path is resolved: the cache location is
-    // derived from the application data directory.
     QCoreApplication::setOrganizationName(QStringLiteral("LucidGrasp"));
     QCoreApplication::setOrganizationDomain(QStringLiteral("lucidgrasp.local"));
     QCoreApplication::setApplicationName(QStringLiteral("LucidGrasp"));
-    // Supplied by CMake from project(... VERSION ...). Do not hardcode a copy
-    // here: the update checker compares this string against the release tag,
-    // so a stale literal means every user is told to update forever.
     QCoreApplication::setApplicationVersion(QStringLiteral(LUCIDGRASP_VERSION));
 
     QStringList args;
@@ -173,6 +164,14 @@ int main(int argc, char* argv[])
         || args.contains(QLatin1String("-h"))) {
         printUsage();
         return 0;
+    }
+
+    if (args.contains(QLatin1String("--reset-legal-agreement"))) {
+        QSettings agreement(QSettings::IniFormat, QSettings::UserScope,
+                            QCoreApplication::organizationName(),
+                            QCoreApplication::applicationName());
+        agreement.remove(QStringLiteral("legal/agreed"));
+        agreement.sync();
     }
 
     if (args.contains(QLatin1String("--selftest"))) {
@@ -186,14 +185,11 @@ int main(int argc, char* argv[])
     }
 
 #if defined(Q_OS_LINUX)
-    // Scoped to Linux on purpose. GTK3's native file dialog rejects files, so
-    // Qt's own is used there. This used to be a global attribute, which also
-    // suppressed the platform dialog on Windows and macOS -- the one place the
-    // OS can legitimately own how a file picker looks, and the reason the OS
-    // palette was not reaching it on those two platforms.
     QApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
 #endif
     QApplication app(argc, argv);
+    QGuiApplication::setDesktopFileName(
+        QStringLiteral("io.github.dialga_cmd.LucidGrasp"));
     MainWindow window;
     window.resize(1100, 700);
     window.show();

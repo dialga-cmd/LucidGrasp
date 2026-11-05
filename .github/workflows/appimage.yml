@@ -1,0 +1,67 @@
+name: Build AppImage
+
+on:
+  release:
+    types: [published]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    # Build on the oldest supported LTS so the AppImage keeps working on 24.04.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake \
+            qt6-base-dev \
+            libopencv-dev \
+            binutils \
+            wget \
+            ca-certificates
+
+      - name: Download appimagetool
+        run: |
+          wget -q -O appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool
+
+      - name: Build LucidGrasp
+        run: |
+          mkdir build
+          cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release
+          make -j$(nproc)
+
+      - name: Create AppDir
+        run: |
+          mkdir -p AppDir/usr/bin
+          mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
+          mkdir -p AppDir/usr/share/applications
+
+          cp build/LucidGrasp AppDir/usr/bin/
+          cp lucidgrasp.png AppDir/usr/share/icons/hicolor/256x256/apps/io.github.dialga_cmd.LucidGrasp.png
+          cp io.github.dialga_cmd.LucidGrasp.desktop AppDir/usr/share/applications/io.github.dialga_cmd.LucidGrasp.desktop
+
+          cp io.github.dialga_cmd.LucidGrasp.desktop AppDir/
+          cp lucidgrasp.png AppDir/io.github.dialga_cmd.LucidGrasp.png
+
+          echo '#!/bin/sh' > AppDir/AppRun
+          echo 'exec "$APPDIR/usr/bin/LucidGrasp" "$@"' >> AppDir/AppRun
+          chmod +x AppDir/AppRun
+
+      - name: Package AppImage
+        run: |
+          APPIMAGE_EXTRACT_AND_RUN=1 ./appimagetool AppDir LucidGrasp-x86_64.AppImage
+
+      - name: Upload Artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v7
+        with:
+          name: LucidGrasp-AppImage
+          path: LucidGrasp-x86_64.AppImage

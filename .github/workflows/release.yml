@@ -3,28 +3,27 @@ name: Build and Release
 on:
   release:
     types: [published]
-  # The bug-fix review cycle needs CI feedback without publishing a release.
-  # The build + self-test steps run on every pull request; the packaging and
-  # asset-upload steps are gated on github.event_name == 'release' so a PR can
-  # neither touch a release nor fail trying to attach assets to a nonexistent
-  # one (softprops/action-gh-release has no tag to upload to on a PR ref).
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
   build-linux:
-    runs-on: ubuntu-latest
+    # Build on the oldest supported LTS so the tarball and AppImage keep
+    # working on 24.04; ubuntu-latest now resolves to 26.04.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y cmake qt6-base-dev libopencv-dev g++
+        sudo apt-get install -y cmake qt6-base-dev libopencv-dev g++ wget ca-certificates
 
     - name: Build Project
       run: |
@@ -39,61 +38,74 @@ jobs:
         QT_QPA_PLATFORM=offscreen ./LucidGrasp --selftest
 
     - name: Package Release
-      if: github.event_name == 'release'
       run: |
         mkdir -p package/LucidGrasp
         cp build/LucidGrasp package/LucidGrasp/
         cp lucidgrasp.png package/LucidGrasp/
-        cp lucidgrasp.desktop package/LucidGrasp/
+        cp io.github.dialga_cmd.LucidGrasp.desktop package/LucidGrasp/
         cp README.md package/LucidGrasp/
         cp LICENSE package/LucidGrasp/
         cd package
         tar -czvf lucidgrasp-linux-x64.tar.gz LucidGrasp/
 
-    - name: Upload Release Asset
+    - name: Build AppImage
+      run: |
+        wget -q -O appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+        chmod +x appimagetool
+        mkdir -p AppDir/usr/bin
+        mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
+        mkdir -p AppDir/usr/share/applications
+        cp build/LucidGrasp AppDir/usr/bin/
+        cp lucidgrasp.png AppDir/usr/share/icons/hicolor/256x256/apps/io.github.dialga_cmd.LucidGrasp.png
+        cp io.github.dialga_cmd.LucidGrasp.desktop AppDir/usr/share/applications/io.github.dialga_cmd.LucidGrasp.desktop
+        cp io.github.dialga_cmd.LucidGrasp.desktop AppDir/
+        cp lucidgrasp.png AppDir/io.github.dialga_cmd.LucidGrasp.png
+        echo '#!/bin/sh' > AppDir/AppRun
+        echo 'exec "$APPDIR/usr/bin/LucidGrasp" "$@"' >> AppDir/AppRun
+        chmod +x AppDir/AppRun
+        APPIMAGE_EXTRACT_AND_RUN=1 ./appimagetool AppDir LucidGrasp-x86_64.AppImage
+
+    - name: Upload Release Assets
       if: github.event_name == 'release'
-      uses: softprops/action-gh-release@v2
+      uses: softprops/action-gh-release@v3
       with:
-        files: package/lucidgrasp-linux-x64.tar.gz
+        files: |
+          package/lucidgrasp-linux-x64.tar.gz
+          LucidGrasp-x86_64.AppImage
 
   build-windows:
     runs-on: windows-latest
+    timeout-minutes: 45
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
     - name: Install Qt6
       uses: jurplel/install-qt-action@v4
       with:
-        # Qt 6.5 LTS only ships MSVC 2019 (v142) desktop binaries for Windows.
-        # There is no win64_msvc2022_64 build for any 6.5.x release, so asking
-        # for it makes aqt fall back and fail with
-        # "The packages ['qt_base'] were not found".
-        version: '6.5.*'
+        version: '6.8.3'
         host: 'windows'
         target: 'desktop'
-        arch: 'win64_msvc2019_64'
+        arch: 'win64_msvc2022_64'
 
     - name: Install OpenCV
       shell: pwsh
       run: |
-        $opencvVersion = "4.10.0"
+        $opencvVersion = "4.14.0"
         $url = "https://github.com/opencv/opencv/releases/download/$opencvVersion/opencv-$opencvVersion-windows.exe"
         Invoke-WebRequest -Uri $url -OutFile opencv-installer.exe
         Start-Process -FilePath .\opencv-installer.exe -ArgumentList "-o`"C:\opencv`" -y" -Wait
+        $dll = Get-ChildItem -Path "C:\opencv\opencv\build\x64" -Recurse -Filter "opencv_world*.dll" |
+          Select-Object -First 1
+        if (-not $dll) { throw "opencv_world DLL not found under C:\opencv" }
         echo "OpenCV_DIR=C:\opencv\opencv\build" >> $env:GITHUB_ENV
-        # Single definition of where the runtime DLLs live, shared by the self
-        # test (which needs them on PATH) and the bundling step (which copies
-        # them next to the exe). They used to be written out twice.
-        echo "OpenCV_BIN=C:\opencv\opencv\build\x64\vc16\bin" >> $env:GITHUB_ENV
+        echo "OpenCV_BIN=$($dll.DirectoryName)" >> $env:GITHUB_ENV
 
     - name: Setup MSVC
       uses: ilammy/msvc-dev-cmd@v1
       with:
-        # Match the v142 toolset that both Qt 6.5 msvc2019_64 and the OpenCV
-        # 4.10.0 vc16 prebuilt binaries were compiled with.
-        toolset: '14.29'
+        arch: x64
 
     - name: Build Project
       shell: pwsh
@@ -107,20 +119,11 @@ jobs:
       shell: pwsh
       run: |
         $env:QT_QPA_PLATFORM = "offscreen"
-        # OpenCV's DLLs sit in their own bin directory and are not on PATH, and
-        # nothing has copied them next to the exe yet -- that happens in the
-        # bundling step below. Without this the loader cannot start the process
-        # at all, so the step fails with no output and no clue as to why.
         $env:PATH = "$env:OpenCV_BIN;$env:PATH"
         .\build\LucidGrasp.exe --selftest
-        if ($LASTEXITCODE -ne 0) {
-          # -1073741515 is STATUS_DLL_NOT_FOUND, i.e. the process never ran, as
-          # opposed to a test having run and failed.
-          throw "Self-test failed (exit code $LASTEXITCODE)"
-        }
+        if ($LASTEXITCODE -ne 0) { throw "Self-test failed (exit code $LASTEXITCODE)" }
 
     - name: Bundle Dependencies
-      if: github.event_name == 'release'
       shell: pwsh
       run: |
         $dest = "package\LucidGrasp"
@@ -129,51 +132,95 @@ jobs:
         Copy-Item lucidgrasp.png $dest\
         Copy-Item README.md $dest\
         Copy-Item LICENSE $dest\
-
-        # Run windeployqt to bundle all Qt DLLs, plugins, and platform files
         windeployqt --release --no-translations --no-system-d3d-compiler --no-opengl-sw $dest\LucidGrasp.exe
-
-        # Copy the OpenCV world DLL
         Copy-Item "$env:OpenCV_BIN\opencv_world*.dll" $dest\
 
     - name: Install Inno Setup
-      if: github.event_name == 'release'
       shell: pwsh
       run: |
         choco install innosetup -y --no-progress
 
     - name: Compile Windows Installer
-      if: github.event_name == 'release'
       shell: pwsh
       run: |
-        # Read the version out of the CMake cache rather than keeping a third
-        # copy of it: it is already in project(... VERSION ...) and already
-        # compiled into the binary, so this makes the installer agree with both
-        # instead of drifting from whichever one someone remembers to bump.
-        # The entry is CMAKE_PROJECT_VERSION, not PROJECT_VERSION. project()
-        # sets PROJECT_VERSION as an ordinary variable, which CMake never
-        # writes to the cache, so a search for the bare name finds nothing.
         $cache = Get-Content build\CMakeCache.txt
         $match = $cache | Select-String '^CMAKE_PROJECT_VERSION:STATIC=(.+)$'
-        if (-not $match) {
-          Write-Host "VERSION entries actually present in CMakeCache.txt:"
-          $cache | Select-String 'VERSION' | ForEach-Object { Write-Host "  $_" }
-          throw "CMAKE_PROJECT_VERSION not found in CMakeCache.txt"
-        }
+        if (-not $match) { throw "CMAKE_PROJECT_VERSION not found in CMakeCache.txt" }
         $version = $match.Matches[0].Groups[1].Value
-        echo "Installer version: $version"
-
-        # [^\r\n]* rather than .*$ because the file is read raw: a greedy .*
-        # would swallow the \r of a CRLF line ending and leave the rewritten
-        # line with a mismatched terminator.
-        (Get-Content installer.iss -Raw) `
-          -replace '(?m)^AppVersion=[^\r\n]*', "AppVersion=$version" `
-          | Set-Content installer.iss -NoNewline
+        (Get-Content installer.iss -Raw) -replace '(?m)^AppVersion=[^\r\n]*', "AppVersion=$version" | Set-Content installer.iss -NoNewline
         & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
-        if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
+
+    - name: Validate Scoop manifest
+      if: github.event_name == 'pull_request'
+      shell: pwsh
+      run: |
+        $exe = "package\LucidGrasp_Setup_x64.exe"
+        if (-not (Test-Path $exe)) { throw "Installer not found: $exe" }
+        $cache = Get-Content build\CMakeCache.txt
+        $match = $cache | Select-String '^CMAKE_PROJECT_VERSION:STATIC=(.+)$'
+        if (-not $match) { throw "CMAKE_PROJECT_VERSION not found in CMakeCache.txt" }
+        $version = $match.Matches[0].Groups[1].Value
+        $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($hash.Length -ne 64) { throw "Bad SHA256 length: $($hash.Length)" }
+        $manifest = @{
+          version     = "v$version"
+          description = "High-performance image search engine built to identify and match visual media."
+          homepage    = "https://github.com/dialga-cmd/LucidGrasp"
+          url         = "https://github.com/dialga-cmd/LucidGrasp/releases/download/v$version/LucidGrasp_Setup_x64.exe"
+          hash        = $hash
+          moniker     = "lucidgrasp"
+        }
+        $json = $manifest | ConvertTo-Json
+        $parsed = $json | ConvertFrom-Json
+        if ($parsed.hash -ne $hash) { throw "Manifest hash mismatch" }
+        Write-Output "Scoop manifest OK for v${version}: $hash"
 
     - name: Upload Release Asset
       if: github.event_name == 'release'
-      uses: softprops/action-gh-release@v2
+      uses: softprops/action-gh-release@v3
       with:
-        files: package/LucidGrasp_Setup_x64.exe
+        files: |
+          package/LucidGrasp_Setup_x64.exe
+
+  update-scoop:
+    if: github.event_name == 'release'
+    needs: build-windows
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+
+    - name: Update Scoop Bucket
+      env:
+        BUCKET_TOKEN: ${{ secrets.BUCKET_TOKEN }}
+      run: |
+        set -eu
+        TAG=${{ github.event.release.tag_name }}
+        VERSION=${TAG#v}
+        REPO=${{ github.repository }}
+        URL="https://github.com/$REPO/releases/download/$TAG/LucidGrasp_Setup_x64.exe"
+        curl -fsSL "$URL" -o setup.exe
+        SIZE=$(stat -c%s setup.exe)
+        test "$SIZE" -gt 1000000
+        HASH=$(sha256sum setup.exe | cut -d' ' -f1)
+        cat <<EOF > lucidgrasp.json
+        {
+          "version": "$VERSION",
+          "description": "High-performance image search engine built to identify and match visual media.",
+          "homepage": "https://github.com/$REPO",
+          "url": "$URL",
+          "hash": "$HASH",
+          "moniker": "lucidgrasp"
+        }
+        EOF
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+        git clone https://x-access-token:$BUCKET_TOKEN@github.com/dialga-cmd/lucidgrasp-bucket.git
+        cp lucidgrasp.json lucidgrasp-bucket/
+        cd lucidgrasp-bucket
+        git add lucidgrasp.json
+        git commit -m "Update LucidGrasp to $VERSION"
+        git push
+

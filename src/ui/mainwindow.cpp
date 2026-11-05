@@ -1,14 +1,19 @@
 #include "ui/mainwindow.h"
 
 #include "ui/key_entry_dialog.h"
+#include "ui/file_actions.h"
 
 #include <QAbstractButton>
 #include <QAction>
+#include <QCheckBox>
+#include <QCloseEvent>
 #include <QColor>
 #include <QDesktopServices>
 #include <QDialog>
+#include <QDialogButtonBox>
 #include <QElapsedTimer>
 #include <QFileDialog>
+#include <QFileIconProvider>
 #include <QFileInfo>
 #include <QGroupBox>
 #include <QGuiApplication>
@@ -22,23 +27,27 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QMetaObject>
+#include <QMimeData>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPair>
 #include <QPalette>
+#include <QPointer>
 #include <QPixmap>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QSet>
+#include <QSettings>
 #include <QShowEvent>
 #include <QSpinBox>
+#include <QKeyEvent>
 #include <QStatusBar>
-// QGuiApplication forward-declares QStyleHints, so styleHints()->anything()
-// is a call on an incomplete type unless this is included. The class has
-// existed since Qt 5; only colorScheme() on it is version gated.
 #include <QStyleHints>
+#include <QTabWidget>
+#include <QTextBrowser>
 #include <QTimer>
 #include <QUrl>
+#include <QUrlQuery>
 #include <QVBoxLayout>
 #include <QVector>
 #include <algorithm>
@@ -48,12 +57,283 @@ namespace {
 
 constexpr qreal kPi = 3.14159265358979323846;
 
-// The sun and the moon are painted rather than pulled from the desktop icon
-// theme. The freedesktop names for these -- "weather-clear" and
-// "weather-clear-night" -- resolve on Linux but come back empty on Windows, and
-// the toggle would then draw with no icon at all. Painting keeps one
-// implementation on every platform and lets the glyph take the accent colour of
-// whichever theme is active.
+const char *kPrivacyPolicyText = R"PRIVACY(
+LucidGrasp Privacy Policy
+
+Last reviewed: October 2026
+
+LucidGrasp is designed so that your work stays on your machine. Your library,
+your searches and your settings are never collected, uploaded or sold. This
+policy states exactly what the application does with your data.
+
+DATA CONTROLLER
+The data controller is the project maintainer, reachable at
+adityaraj1234@duck.com for all privacy requests. The project is a free,
+open-source effort that processes no personal data on its own behalf.
+
+DATA THAT STAYS ON YOUR COMPUTER
+
+Indexing and matching read image files only from folders you choose. Every
+similarity comparison is computed on your own machine and no image data ever
+leaves it.
+
+The search index is cached to your own disk in your system's standard
+per-user data directory (for example ~/.local/share/LucidGrasp/indexes/ on
+Linux). You can delete the cache at any time to force a rebuild; nothing is
+uploaded anywhere.
+
+Preferences such as whether automatic update checks are enabled and which
+release version you are currently ignoring are stored in a per-user INI file
+in your system's standard configuration directory.
+
+THE ONE TIME DATA LEAVES YOUR COMPUTER
+
+Update checks. On launch, unless you have turned automatic checks off in the
+Updates menu, LucidGrasp makes a single HTTPS request to the GitHub API asking
+for the latest release announcement of this project. The request carries only
+the repository identifier and the version number already installed on your
+machine. It does not include your name, your files or your library contents.
+As with any website visit, GitHub receives your IP address and the ordinary
+HTTP headers your browser or this application sends; GitHub Inc. is based in
+the United States, and GitHub's own privacy policy applies to that one
+request. This is necessary for the legitimate interest of notifying users of
+security fixes and new releases, and it can be switched off entirely in the
+Updates menu. If a newer release exists you are shown a dialog with a link;
+nothing is downloaded or installed unless you choose to do it yourself.
+
+Help menu links. "Report an Issue", "Request a Feature", "View on GitHub" and
+"Contact the Developer" open whichever external service they name (GitHub or
+your mail application) using your normal default apps. Those services have
+their own privacy policies.
+
+WHAT LUCIDGRASP NEVER DOES
+
+No analytics, no telemetry, no crash reporting, no advertising, no cookies,
+no accounts and no background services that phone home. There is no tracking
+of any kind, and no sale or sharing of personal data: the "sale" and
+"sharing" definitions under the CCPA/CPRA and comparable US state privacy
+laws never apply, so there is nothing to opt out of.
+
+LucidGrasp does not inspect, upload or transmit your images, folders or search
+queries to anyone, and no user data is used to train any machine-learning
+model.
+
+CHILDREN
+The Software is not directed at children. Consistent with COPPA (US) and the
+child-consent age set by EU member states (13 to 16 under the GDPR),
+LucidGrasp does not knowingly collect personal information from anyone under
+13.
+
+YOUR RIGHTS
+LucidGrasp holds no personal data about you, but the rights below are honored
+to the fullest extent the law requires. Write to adityaraj1234@duck.com to
+exercise any of them: access and know, correct, delete, restrict, object,
+portability, no discrimination for exercising a right, and submission by a
+duly authorized agent. Requests are answered within the statutory deadlines
+(30 days under GDPR/UK GDPR; 45 days under CCPA/CPRA). Under GDPR Article 77
+you may also complain to your local supervisory authority.
+
+CONTACT
+
+Questions about this policy: adityaraj1234@duck.com.
+)PRIVACY";
+
+const char *kTermsText = R"TERMS(
+LucidGrasp Terms of Use
+
+Effective: October 2026
+
+These terms govern your use of the LucidGrasp application, its source code,
+and its releases. By downloading, installing, using, or redistributing the
+Software you agree to them. If you do not agree, do not install or use it.
+
+THE SOFTWARE IS FREE
+
+LucidGrasp is distributed free of charge. Nothing in it is sold, licensed for
+a fee, or offered as a subscription. Because nothing is purchased there is no
+price, no cancellation process, and no refund policy is needed or offered.
+Any copy of LucidGrasp offered for money by a third party is not authorized
+by this project.
+
+OPEN SOURCE LICENSE
+
+The source code is licensed under the MIT License (see the LICENSE file),
+which permits use, copying, modification, merging, publication,
+distribution, sublicensing, and sale of the source code subject to its
+conditions.
+
+UPDATES
+
+Unless automatic checks are turned off, the Software checks GitHub on launch
+for a newer release announcement and shows a dialog when one exists (see the
+Privacy Policy). Nothing is downloaded or installed automatically.
+
+ACCEPTABLE USE AND LIABILITY
+
+You agree to use the Software lawfully and only on systems you own or are
+authorized to access, as described in the Acceptable Use Policy. The Software
+is provided "as is" without warranty of any kind, and the authors and
+copyright holders are not liable for any damages arising from its use, as
+described in DISCLAIMER.md.
+
+THIRD-PARTY SERVICES
+
+The update check talks to the GitHub API; Help menu links use your default
+browser or mail application. Those services' own terms and policies apply to
+those interactions.
+
+INTERNATIONAL USE AND EXPORT
+
+The Software is open source and publicly available. Under the US Export
+Administration Regulations, publicly available open source software is
+generally not subject to the EAR. You remain responsible for complying with
+the laws of the country in which you use or redistribute it.
+
+GOVERNING LAW
+
+These terms are governed by the laws of the Republic of India, without regard
+to its conflict-of-law rules, and disputes are subject to the exclusive
+jurisdiction of the courts of India.
+
+CHANGES AND CONTACT
+
+These terms may be revised in this repository as the project evolves.
+Questions: adityaraj1234@duck.com.
+)TERMS";
+
+const char *kDisclaimerText = R"DISCLAIMER(
+LucidGrasp Disclaimer of Warranties and Limitation of Liability
+
+Effective: October 2026
+
+AS-IS DISCLAIMER
+THE SOFTWARE IS PROVIDED "AS IS" AND "AS AVAILABLE", WITHOUT WARRANTY OF ANY
+KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE, ACCURACY, AND
+NON-INFRINGEMENT.
+
+LucidGrasp is developed and published by an individual maintainer on a
+best-effort basis. It is not warranted that the Software will be
+uninterrupted, error-free, secure, virus-free, or that defects will be
+corrected.
+
+NO GUARANTEE OF RESULTS
+Image similarity scoring is heuristic. No particular search result, ranking,
+or accuracy percentage is guaranteed, and results are for informational use
+only. They must not be relied upon for safety-critical, medical, or
+regulatory decisions.
+
+LIMITATION OF LIABILITY
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THE AUTHORS AND COPYRIGHT
+HOLDERS SHALL NOT BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY,
+WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF,
+OR IN CONNECTION WITH THE SOFTWARE, ITS USE, OR ITS RESULTS - INCLUDING
+INDIRECT, INCIDENTAL, CONSEQUENTIAL, OR EXEMPLARY DAMAGES, LOSS OF DATA, LOSS
+OF PROFITS, OR BUSINESS INTERRUPTION.
+
+The software is free; nothing is sold; these limitations are a fundamental
+basis of its availability.
+
+NOT ADVICE
+Nothing in the Software, its documentation, or its output constitutes legal,
+medical, security, or regulatory advice, a compliance review, or a
+certification of compliance with any law or framework.
+)DISCLAIMER";
+
+const char *kAcceptableUseText = R"USE(
+LucidGrasp Acceptable Use Policy
+
+Effective: October 2026
+
+LucidGrasp indexes folders on your own machine and finds visually similar
+images. You must use it within these limits.
+
+LAWFUL USE ONLY
+Use the Software only in compliance with applicable law, including copyright
+and other intellectual property law, data protection and privacy law,
+computer misuse and unauthorized-access law, and export, import, and
+sanctions law that applies to you.
+
+AUTHORIZED SYSTEMS ONLY
+Index only files and systems you own or are authorized by the owner to
+access. Do not use the Software against systems, networks, or data you have
+no right to read.
+
+WHAT YOU MAY NOT DO
+You may not use the Software to plan, facilitate, or commit any unlawful act;
+to infringe another person's rights; to surveil, track, or profile
+individuals without lawful basis; to bypass security or access controls you
+are not authorized to use; to deliver malware; or to misrepresent the
+Software, its author, or its affiliation.
+
+REDISTRIBUTION
+The source code and binaries may be redistributed under the MIT License.
+Redistributors must keep the license text and copyright notice, mark their
+modifications clearly, and must not represent modified copies as the
+official project.
+
+ENFORCEMENT
+Report violations and vulnerabilities privately: security matters go through
+SECURITY.md (GitHub private vulnerability reporting); everything else goes to
+adityaraj1234@duck.com. This policy supplements, and does not replace, the
+Terms of Use and the Disclaimer.
+)USE";
+
+bool isHeadingLine(const QString &line) {
+  if (line.isEmpty() || line.size() > 44)
+    return false;
+  bool hasLetter = false;
+  for (const QChar c : line) {
+    if (c.isLetter()) {
+      if (!c.isUpper())
+        return false;
+      hasLetter = true;
+    } else if (!c.isSpace() && !c.isDigit() && c != QLatin1Char('-') &&
+               c != QLatin1Char('.')) {
+      return false;
+    }
+  }
+  return hasLetter;
+}
+
+QString reflowLegalText(const QString &text) {
+  QStringList paragraphs;
+  QString paragraph;
+  const QStringList lines = text.split(QLatin1Char('\n'));
+  for (const QString &sourceLine : lines) {
+    const QString line = sourceLine.trimmed();
+    if (line.isEmpty()) {
+      if (!paragraph.isEmpty()) {
+        paragraphs.append(paragraph);
+        paragraph.clear();
+      }
+      continue;
+    }
+    if (!paragraph.isEmpty())
+      paragraph += QLatin1Char(' ');
+    paragraph += line;
+    if (isHeadingLine(line)) {
+      paragraphs.append(paragraph);
+      paragraph.clear();
+    }
+  }
+  if (!paragraph.isEmpty())
+    paragraphs.append(paragraph);
+  return paragraphs.join(QStringLiteral("\n\n"));
+}
+
+class AgreementDialog : public QDialog {
+public:
+  using QDialog::QDialog;
+
+protected:
+  void reject() override {}
+  void closeEvent(QCloseEvent *event) override {
+    event->accept();
+    QCoreApplication::quit();
+  }
+};
+
 QIcon paintThemeGlyph(bool dark, const QColor &colour, int logicalSize) {
   const qreal dpr = qApp->devicePixelRatio();
   const int px = qMax(1, qRound(logicalSize * dpr));
@@ -67,16 +347,6 @@ QIcon paintThemeGlyph(bool dark, const QColor &colour, int logicalSize) {
   p.scale(dpr, dpr);
 
   if (dark) {
-    // Crescent. subtracted() rather than an OddEvenFill two-ellipse path:
-    // with the latter, the parts of the bite that spill outside the main
-    // disc have odd winding too, so they get painted and the result is a
-    // symmetric difference, not a crescent.
-    //
-    // The disc is then inset and nudged right, because a crescent's ink
-    // always crowds into the lower left. These values were found by
-    // rendering candidates and centring the ink's *bounding box*, which is
-    // what the eye reads as "centred" -- a crescent's centroid can never
-    // sit on the canvas centre no matter how it is drawn.
     const qreal ox = s * 0.11, oy = s * 0.04, d = s * 0.92;
     QPainterPath disc, bite;
     disc.addEllipse(QRectF(ox, oy, d, d));
@@ -85,9 +355,6 @@ QIcon paintThemeGlyph(bool dark, const QColor &colour, int logicalSize) {
     p.setBrush(colour);
     p.drawPath(disc.subtracted(bite));
   } else {
-    // Sun: a disc ringed by eight rays. The stroke is kept light and the
-    // rays start clear of the disc, because at the 17px this is drawn at,
-    // anything heavier fuses the eight rays into a single smear.
     const QRectF core(s * 0.32, s * 0.32, s * 0.36, s * 0.36);
     p.setPen(Qt::NoPen);
     p.setBrush(colour);
@@ -98,7 +365,7 @@ QIcon paintThemeGlyph(bool dark, const QColor &colour, int logicalSize) {
     p.setPen(QPen(colour, qMax(1.0, s * 0.06), Qt::SolidLine, Qt::RoundCap));
     p.setBrush(Qt::NoBrush);
     for (int i = 0; i < 8; ++i) {
-      const qreal a = i * kPi / 4.0; // first ray points straight up
+      const qreal a = i * kPi / 4.0;
       const qreal dx = std::cos(a), dy = std::sin(a);
       p.drawLine(QPointF(mid.x() + dx * inner, mid.y() + dy * inner),
                  QPointF(mid.x() + dx * outer, mid.y() + dy * outer));
@@ -107,15 +374,6 @@ QIcon paintThemeGlyph(bool dark, const QColor &colour, int logicalSize) {
   p.end();
   return QIcon(pixmap);
 }
-
-// ----- colours taken from the desktop ---------------------------------------
-//
-// The palette the platform hands us is the only place a colour can come from if
-// the desktop is to decide the theme. Worth being precise about what that
-// actually yields: it is genuinely native on Windows, follows the GTK theme on
-// Linux when a platform-theme plugin is loaded, and on macOS it is Qt's own
-// approximation of the system colours rather than the real ones. "Let the OS
-// choose" is only ever as good as what the OS reports.
 
 double relativeLuminance(const QColor &c) {
   auto channel = [](int v) {
@@ -137,10 +395,6 @@ QColor mixToward(const QColor &from, const QColor &to, double t) {
                           from.blueF() + (to.blueF() - from.blueF()) * t);
 }
 
-// The scheme the desktop is not currently using, built by inverting lightness
-// and carrying hue and saturation through. Qt only reports and holds the
-// current scheme, so the other one has to be constructed; inverting keeps the
-// desktop's accent recognisable instead of substituting a guess for it.
 QPalette invertedPalette(const QPalette &in) {
   constexpr double kLo = 5.0, kHi = 94.0;
   QPalette out = in;
@@ -156,23 +410,23 @@ QPalette invertedPalette(const QPalette &in) {
 }
 
 struct ThemeColours {
-  QColor window;  // app background
-  QColor panel;   // group boxes
-  QColor field;   // inputs
+  QColor window;
+  QColor panel;
+  QColor field;
   QColor text;
-  QColor muted;   // secondary and disabled text
+  QColor muted;
   QColor border;
-  QColor accent;         // primary button
-  QColor onAccent;       // its label, per state: see below
-  QColor onAccentHover;  //
-  QColor onAccentPressed;      //
-  QColor accentHover;          //
-  QColor accentPressed;        // shades rather than the neutral hover, or the
-  QColor disabled;             // button turns grey.
-  QColor hover;         // neutral hover for controls sitting on @field
-  QColor pressed;       //
-  QColor itemHover;     // hover for list items, which sit on @panel
-  QColor checked;       // selected result cell
+  QColor accent;
+  QColor onAccent;
+  QColor onAccentHover;
+  QColor onAccentPressed;
+  QColor accentHover;
+  QColor accentPressed;
+  QColor disabled;
+  QColor hover;
+  QColor pressed;
+  QColor itemHover;
+  QColor checked;
   QColor onChecked;
 };
 
@@ -182,26 +436,11 @@ ThemeColours coloursFromPalette(const QPalette &p) {
   QColor window = p.color(QPalette::Window);
   const QColor base = p.color(QPalette::Base);
 
-  // The layout sets a card on a background, so the two have to differ. Plenty
-  // of themes report the same value for Window and Base, and inverting can
-  // collapse them onto the same clamp. When that happens the background is
-  // stepped away by the least amount that reads, rather than shipping a flat
-  // rectangle with a border drawn around nothing.
   if (contrastRatio(base, window) < 1.02)
     window = mixToward(window, text, 0.05);
 
-  // Cards and inputs deliberately share the content surface, and the 1px
-  // border is what separates them -- which is how the desktop draws the same
-  // pair of things.
   const QColor panel = base, field = base;
 
-  // Muted text. PlaceholderText is the role meant to supply this, but several
-  // styles leave it identical to the text colour, and QColor::operator!= also
-  // compares the colour spec, so an unstyled placeholder compares unequal to
-  // black text and would be taken at face value -- giving muted labels that
-  // are simply full-strength black. So the role is used only when it really
-  // is muted, and otherwise the text colour is washed toward the background
-  // as far as the body-text ratio allows.
   QColor muted = text;
   const QColor placeholder = p.color(QPalette::PlaceholderText);
   if (placeholder.rgb() != text.rgb() &&
@@ -217,14 +456,6 @@ ThemeColours coloursFromPalette(const QPalette &p) {
     }
   }
 
-  // Pressing a button darkens the accent, which walks it across the luminance
-  // at which a readable label has to flip between black and white. Qt's own
-  // blue sits right on that crossover: white reads 3.7:1 on the accent at
-  // rest, black 3.6:1 on the pressed state, so no single label clears the ratio
-  // across all three. Hence one label per state rather than one per button --
-  // the desktop's own label first, then black and white, whichever measures
-  // best. Most accents are dark enough that all three agree and nothing flips;
-  // it is the lighter desktop accents that need this.
   const QColor accentHover = mixToward(accent, text, 0.12);
   const QColor accentPressed = mixToward(accent, text, 0.24);
   const QColor labelOptions[] = {p.color(QPalette::HighlightedText),
@@ -275,7 +506,7 @@ ThemeColours coloursFromPalette(const QPalette &p) {
       onChecked};
 }
 
-} // namespace
+}
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent), desktopPalette_(QGuiApplication::palette()) {
@@ -285,34 +516,43 @@ MainWindow::MainWindow(QWidget *parent)
   central->setObjectName(QStringLiteral("centralWidget"));
   auto *rootLayout = new QVBoxLayout(central);
 
-  // ----- top bar: title on the left, theme control on the right -----
   auto *topBar = new QHBoxLayout;
   topBar->setContentsMargins(0, 0, 0, 0);
+  topBar->setSpacing(8);
 
   auto *title = new QLabel(QStringLiteral("LucidGrasp"), central);
   title->setObjectName(QStringLiteral("titleLabel"));
   topBar->addWidget(title);
   topBar->addStretch(1);
 
-  // Square, icon-only: the glyph shows the theme you are in, the tooltip says
-  // what clicking does, and the square footprint keeps the bar compact.
-  themeToggleBtn_ = new QPushButton(central);
-  themeToggleBtn_->setObjectName(QStringLiteral("themeToggleBtn"));
-  themeToggleBtn_->setCursor(Qt::PointingHandCursor);
-
-  // Sized off the font so it lines up with the buttons in the panels below
-  // and still grows if the user raises their system font size.
   const int side = fontMetrics().height() + 12;
-  themeToggleBtn_->setIconSize(QSize(side - 12, side - 12));
-  themeToggleBtn_->setFixedSize(side, side);
+  const auto makeToolButton = [&](const QString &objectName,
+                                  const QString &tip) -> QPushButton * {
+    auto *btn = new QPushButton(central);
+    btn->setObjectName(objectName);
+    btn->setToolTip(tip);
+    btn->setCursor(Qt::PointingHandCursor);
+    btn->setIconSize(QSize(side - 12, side - 12));
+    btn->setFixedSize(side, side);
+    return btn;
+  };
+
+  themeToggleBtn_ =
+      makeToolButton(QStringLiteral("themeToggleBtn"), QString());
   topBar->addWidget(themeToggleBtn_);
+
+  revealBtn_ = makeToolButton(QStringLiteral("revealBtn"),
+                              QStringLiteral("Show in file manager"));
+  topBar->addWidget(revealBtn_);
+
+  trashBtn_ = makeToolButton(QStringLiteral("trashBtn"),
+                             QStringLiteral("Move to trash"));
+  topBar->addWidget(trashBtn_);
 
   rootLayout->addLayout(topBar);
 
-  // AFTER
   auto *bodyLayout = new QHBoxLayout;
 
-  // ----- left control panel -----
   auto *leftWidget = new QWidget(central);
   leftWidget->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
   auto *left = new QVBoxLayout(leftWidget);
@@ -385,7 +625,6 @@ MainWindow::MainWindow(QWidget *parent)
 
   bodyLayout->addWidget(leftWidget, 0, Qt::AlignTop);
 
-  // ----- results grid -----
   results_ = new QListWidget(central);
   results_->setObjectName(QStringLiteral("resultsView"));
   results_->setViewMode(QListView::IconMode);
@@ -410,10 +649,15 @@ MainWindow::MainWindow(QWidget *parent)
   connect(searchBtn_, &QPushButton::clicked, this, &MainWindow::startSearch);
   connect(results_, &QListWidget::itemDoubleClicked, this,
           &MainWindow::openResult);
+  connect(revealBtn_, &QPushButton::clicked, this, &MainWindow::revealResult);
+  connect(trashBtn_, &QPushButton::clicked, this, &MainWindow::trashResult);
+  connect(results_, &QListWidget::currentItemChanged, this,
+           [this](QListWidgetItem *) { updateResultActions(); });
   connect(themeToggleBtn_, &QPushButton::clicked, this,
-          &MainWindow::toggleTheme);
+           &MainWindow::toggleTheme);
 
-  // Before the menus, which read the stored opt-out to set their checkmark.
+  results_->installEventFilter(this);
+
   updates_ = new app::UpdateChecker(this);
   connect(updates_, &app::UpdateChecker::updateAvailable, this,
           [this](const QString &tag, const QString &url,
@@ -427,12 +671,11 @@ MainWindow::MainWindow(QWidget *parent)
 
   buildMenus();
 
-  // Seed the initial theme from the desktop, then hand over to the toggle.
-  // Honouring the system here avoids flashing a white window at someone whose
-  // desktop is dark, and costs nothing because the toggle overrides it.
   darkMode_ = systemPrefersDark();
   applyTheme();
   updateActions();
+
+  QTimer::singleShot(0, this, &MainWindow::showWelcomeDialog);
 }
 
 MainWindow::~MainWindow() {
@@ -446,23 +689,14 @@ MainWindow::~MainWindow() {
 void MainWindow::buildMenus() {
   QMenuBar *bar = menuBar();
 
-  // File duplicates the two Browse buttons and Quit. Not padding: it puts the
-  // keyboard route to the common actions where it belongs, and it is the second
-  // half of the point below. Written out rather than using the QMenu::addAction
-  // convenience overloads because the receiver-taking form is deprecated in Qt 6.
   QMenu *file = bar->addMenu(tr("&File"));
 
-  // Kept as members because a search worker reads index_ directly and these two
-  // actions mutate it (browseLibrary -> tryLoadIndex replaces index_). Disabling
-  // only the buttons still left Ctrl+I live during a search, which freed the
-  // entry vector under the worker. They are gated alongside the buttons in
-  // updateActions(), so the keyboard path and the click path can never diverge.
   indexAction_ = file->addAction(tr("Select &Library..."));
   indexAction_->setShortcut(QKeySequence(QStringLiteral("Ctrl+I")));
   connect(indexAction_, &QAction::triggered, this, &MainWindow::browseLibrary);
 
   queryAction_ = file->addAction(tr("Select &Query Image..."));
-  queryAction_->setShortcut(QKeySequence(QStringLiteral("Ctrl+Q")));
+  queryAction_->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+Q")));
   connect(queryAction_, &QAction::triggered, this, &MainWindow::browseQuery);
 
   file->addSeparator();
@@ -477,27 +711,275 @@ void MainWindow::buildMenus() {
       internet->addAction(tr("Surface Scan — API &Keys..."));
   connect(keysAction, &QAction::triggered, this, &MainWindow::openKeyEntry);
 
-  // Help is where the update check lives, and that is the reason this menu
+  // Updates is where the update check lives, and that is the reason this menu
   // exists. The dialog offers a permanent opt-out, so there has to be a way to
   // take it back: without a permanent entry point, "never check for updates"
   // could only be undone by reinstalling the app.
-  QMenu *help = bar->addMenu(tr("&Help"));
+  QMenu *updatesMenu = bar->addMenu(tr("&Updates"));
 
-  QAction *checkAction = help->addAction(tr("&Check for Updates..."));
+  QAction *checkAction = updatesMenu->addAction(tr("&Check for Updates..."));
   checkAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+U")));
   connect(checkAction, &QAction::triggered, this, [this] {
     updateCheckManual_ = true;
-    // updates_ is constructed before the menus (see MainWindow()), so it is
-    // always live here; the guard used to imply it might not be.
     updates_->checkNow();
   });
 
-  autoUpdateAction_ = help->addAction(tr("Check for Updates &Automatically"));
+  autoUpdateAction_ =
+      updatesMenu->addAction(tr("Check for Updates &Automatically"));
   autoUpdateAction_->setCheckable(true);
   autoUpdateAction_->setChecked(!updates_->isDisabled());
   connect(autoUpdateAction_, &QAction::toggled, this, [this](bool on) {
     updates_->setDisabled(!on);
+    if (on) {
+      updateCheckManual_ = true;
+      updates_->checkNow();
+    }
   });
+
+  updatesMenu->addSeparator();
+  QAction *notesAction = updatesMenu->addAction(tr("Latest &Release Notes"));
+  connect(notesAction, &QAction::triggered, this, [this] {
+    openExternal(QStringLiteral("https://github.com/" LUCIDGRASP_REPO
+                                "/releases/latest"));
+  });
+
+  QMenu *help = bar->addMenu(tr("&Help"));
+
+  QAction *reportAction = help->addAction(tr("&Report an Issue..."));
+  connect(reportAction, &QAction::triggered, this, [this] {
+    openIssuePage(
+        QStringLiteral("Bug: "),
+        QStringLiteral(
+            "**What happened?**\n\n"
+            "\n\n"
+            "**What did you expect to happen instead?**\n\n"
+            "\n\n"
+            "**Steps to reproduce**\n\n"
+            "1. \n2. \n\n"
+            "**LucidGrasp version**\n%1\n\n"
+            "**Operating system**\n(e.g. Windows 11, Ubuntu 24.04, macOS 14)\n")
+            .arg(QStringLiteral(LUCIDGRASP_VERSION)));
+  });
+
+  QAction *featureAction = help->addAction(tr("&Request a Feature..."));
+  connect(featureAction, &QAction::triggered, this, [this] {
+    openIssuePage(
+        QStringLiteral("Feature request: "),
+        QStringLiteral(
+            "**What problem are you trying to solve?**\n\n"
+            "\n\n"
+            "**Describe the feature you would like**\n\n"
+            "\n\n"
+            "**Alternatives you considered**\n\n"
+            "\n\n"
+            "**Anything else?**\n(e.g. mockups, example images, links)\n"));
+  });
+
+  help->addSeparator();
+
+  QAction *contactAction = help->addAction(tr("&Contact the Developer"));
+  connect(contactAction, &QAction::triggered, this, [this] {
+    QUrl url(QStringLiteral("mailto:adityaraj1234@duck.com"));
+    QUrlQuery query;
+    query.addQueryItem(QStringLiteral("subject"), tr("LucidGrasp enquiry"));
+    url.setQuery(query);
+    QDesktopServices::openUrl(url);
+  });
+
+  QAction *repoAction = help->addAction(tr("View on &GitHub"));
+  connect(repoAction, &QAction::triggered, this, [this] {
+    openExternal(QStringLiteral("https://github.com/" LUCIDGRASP_REPO));
+  });
+
+  help->addSeparator();
+
+  QAction *privacyAction = help->addAction(tr("&Privacy Policy..."));
+  connect(privacyAction, &QAction::triggered, this,
+          &MainWindow::showPrivacyDialog);
+
+  QAction *legalAction = help->addAction(tr("Legal &Notices..."));
+  connect(legalAction, &QAction::triggered, this,
+          &MainWindow::showLegalNoticesDialog);
+
+  help->addSeparator();
+
+  QAction *aboutAction = help->addAction(tr("&About LucidGrasp"));
+  connect(aboutAction, &QAction::triggered, this,
+          &MainWindow::showAboutDialog);
+}
+
+void MainWindow::openExternal(const QString &url) {
+  if (!QDesktopServices::openUrl(QUrl(url)))
+    statusBar()->showMessage(tr("Could not open %1").arg(url), 6000);
+}
+
+void MainWindow::openIssuePage(const QString &title, const QString &body) {
+  QUrl url(QStringLiteral("https://github.com/" LUCIDGRASP_REPO
+                          "/issues/new"));
+  QUrlQuery query;
+  query.addQueryItem(QStringLiteral("title"), title);
+  query.addQueryItem(QStringLiteral("body"), body);
+  url.setQuery(query);
+  QDesktopServices::openUrl(url);
+}
+
+void MainWindow::showAboutDialog() {
+  QMessageBox::about(
+      this, tr("About LucidGrasp"),
+      tr("<b>LucidGrasp %1</b><br><br>"
+         "Local image search. Index a folder, hand it an image, and it finds "
+         "every visually similar file — all on your own machine.<br><br>"
+         "Project: %2<br>"
+         "Contact: %3<br><br>"
+         "Licensed under the MIT License.")
+          .arg(QStringLiteral(LUCIDGRASP_VERSION),
+               QStringLiteral("https://github.com/" LUCIDGRASP_REPO),
+               QStringLiteral("adityaraj1234@duck.com")));
+}
+
+void MainWindow::showWelcomeDialog() {
+  QSettings agreement(QSettings::IniFormat, QSettings::UserScope,
+                      QCoreApplication::organizationName(),
+                      QCoreApplication::applicationName());
+  if (agreement.value(QStringLiteral("legal/agreed"), false).toBool())
+    return;
+
+  auto *dialog = new AgreementDialog(this);
+  dialog->setWindowTitle(tr("Welcome"));
+  dialog->setWindowModality(Qt::ApplicationModal);
+  dialog->setMinimumSize(520, 470);
+  dialog->resize(560, 540);
+
+  auto *layout = new QVBoxLayout(dialog);
+
+  auto *intro = new QTextBrowser(dialog);
+  intro->setOpenExternalLinks(true);
+  intro->setFocusPolicy(Qt::NoFocus);
+  intro->setHtml(tr(
+      "<h2>Welcome!</h2>"
+      "<p>Thank you for choosing <b>LucidGrasp</b>. This repository on "
+      "GitHub (<i>dialga-cmd/LucidGrasp</i>) is a free and open-source image "
+      "search engine: it indexes a folder on your own computer and finds "
+      "every visually similar image, entirely on your own machine.</p>"
+      "<p>Before you start, we kindly ask you to read the legal documents "
+      "that govern your use of the software: the <b>Privacy Policy</b>, the "
+      "<b>Terms of Use</b>, the <b>Disclaimer of Warranties and Limitation "
+      "of Liability</b> and the <b>Acceptable Use Policy</b>. They are "
+      "deliberately super small — reading all of them would only take "
+      "you about <b>10 minutes</b>. You can open them right here with the "
+      "buttons below, or at any later time from the Help menu.</p>"
+      "<p>We hope you enjoy LucidGrasp! If you are not ready to agree "
+      "yet, close this window to exit — the Welcome dialog will "
+      "return the next time you start the application.</p>"));
+  layout->addWidget(intro, 1);
+
+  auto *docsRow = new QHBoxLayout;
+  auto *privacyButton = new QPushButton(tr("View &Privacy Policy..."), dialog);
+  auto *legalButton = new QPushButton(tr("View &Legal Notices..."), dialog);
+  connect(privacyButton, &QPushButton::clicked, this,
+          &MainWindow::showPrivacyDialog);
+  connect(legalButton, &QPushButton::clicked, this,
+          &MainWindow::showLegalNoticesDialog);
+  docsRow->addWidget(privacyButton);
+  docsRow->addWidget(legalButton);
+  docsRow->addStretch(1);
+  layout->addLayout(docsRow);
+
+  auto *agree = new QCheckBox(
+      tr("I have read all the documents here and will comply with all of "
+         "them"),
+      dialog);
+  layout->addWidget(agree);
+
+  auto *enter = new QPushButton(tr("Enter"), dialog);
+  enter->setObjectName(QStringLiteral("agreementEnterBtn"));
+  enter->setMinimumWidth(120);
+  enter->setDefault(true);
+  enter->setEnabled(false);
+  enter->setStyleSheet(QStringLiteral(
+      "QPushButton#agreementEnterBtn { font-weight: 600; padding: 7px 18px; }"
+      "QPushButton#agreementEnterBtn:disabled {"
+      "  background-color: #c62828; border: 1px solid #8e1b1b;"
+      "  color: #ffffff; }"
+      "QPushButton#agreementEnterBtn:enabled {"
+      "  background-color: #2e7d32; border: 1px solid #1b5e20;"
+      "  color: #ffffff; }"
+      "QPushButton#agreementEnterBtn:enabled:hover {"
+      "  background-color: #388e3c; }"
+      "QPushButton#agreementEnterBtn:enabled:pressed {"
+      "  background-color: #1b5e20; }"));
+  connect(agree, &QCheckBox::toggled, enter, &QPushButton::setEnabled);
+  auto *agreeRow = new QHBoxLayout;
+  agreeRow->addStretch(1);
+  agreeRow->addWidget(enter);
+  layout->addLayout(agreeRow);
+
+  connect(enter, &QPushButton::clicked, dialog, [dialog] {
+    QSettings stored(QSettings::IniFormat, QSettings::UserScope,
+                     QCoreApplication::organizationName(),
+                     QCoreApplication::applicationName());
+    stored.setValue(QStringLiteral("legal/agreed"), true);
+    dialog->accept();
+  });
+
+  dialog->exec();
+  dialog->deleteLater();
+}
+
+void MainWindow::showPrivacyDialog() {
+  auto *dialog = new QDialog(this);
+  dialog->setWindowTitle(tr("Privacy Policy"));
+  dialog->setModal(true);
+  dialog->resize(560, 600);
+
+  auto *layout = new QVBoxLayout(dialog);
+  auto *text = new QTextBrowser(dialog);
+  text->setOpenExternalLinks(true);
+  text->setPlainText(reflowLegalText(QString::fromLatin1(kPrivacyPolicyText)));
+  layout->addWidget(text);
+
+  auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok, dialog);
+  connect(buttons, &QDialogButtonBox::accepted, dialog, &QDialog::accept);
+  connect(dialog, &QDialog::finished, dialog, &QObject::deleteLater);
+  layout->addWidget(buttons);
+
+  dialog->show();
+}
+
+void MainWindow::showLegalNoticesDialog() {
+  auto *dialog = new QDialog(this);
+  dialog->setWindowTitle(tr("Legal Notices"));
+  dialog->setModal(true);
+  dialog->resize(620, 620);
+
+  auto *layout = new QVBoxLayout(dialog);
+  auto *tabs = new QTabWidget(dialog);
+
+  auto *terms = new QTextBrowser(dialog);
+  terms->setOpenExternalLinks(true);
+  terms->setPlainText(reflowLegalText(QString::fromLatin1(kTermsText)));
+  tabs->addTab(terms, tr("Terms of Use"));
+
+  auto *disclaimer = new QTextBrowser(dialog);
+  disclaimer->setOpenExternalLinks(true);
+  disclaimer->setPlainText(
+      reflowLegalText(QString::fromLatin1(kDisclaimerText)));
+  tabs->addTab(disclaimer, tr("Warranty & Liability"));
+
+  auto *acceptableUse = new QTextBrowser(dialog);
+  acceptableUse->setOpenExternalLinks(true);
+  acceptableUse->setPlainText(
+      reflowLegalText(QString::fromLatin1(kAcceptableUseText)));
+  tabs->addTab(acceptableUse, tr("Acceptable Use"));
+
+  layout->addWidget(tabs);
+
+  auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok, dialog);
+  connect(buttons, &QDialogButtonBox::accepted, dialog, &QDialog::accept);
+  connect(dialog, &QDialog::finished, dialog, &QObject::deleteLater);
+  layout->addWidget(buttons);
+
+  dialog->show();
 }
 
 void MainWindow::openKeyEntry() {
@@ -510,60 +992,60 @@ void MainWindow::openKeyEntry() {
 
 void MainWindow::showUpdateDialog(const QString &tag, const QString &url,
                                   const QString &notes) {
-  auto *box = new QMessageBox(this);
-  box->setIcon(QMessageBox::Information);
-  box->setWindowTitle(tr("Update available"));
-  box->setText(tr("LucidGrasp %1 has been released.\nYou are running %2.")
-                   .arg(app::normaliseVersion(tag),
-                        app::UpdateChecker::currentVersion()));
+  auto *dialog = new QDialog(this);
+  dialog->setWindowTitle(tr("Update available"));
+  dialog->setWindowModality(Qt::NonModal);
+  dialog->resize(620, 560);
 
-  if (!notes.isEmpty()) {
-    // Release notes are markdown written for a browser and can be arbitrarily
-    // long, so they are trimmed and set as the detail line rather than the
-    // main text: that wraps them to the dialog width instead of stretching it.
-    constexpr int kMaxNotes = 700;
-    QString shown = notes.left(kMaxNotes).trimmed();
-    if (notes.size() > kMaxNotes)
-      shown += QStringLiteral("\n…");
-    box->setInformativeText(shown);
+  auto *layout = new QVBoxLayout(dialog);
+
+  auto *headline = new QLabel(
+      tr("LucidGrasp %1 has been released.\nYou are running %2.")
+          .arg(app::normaliseVersion(tag),
+               app::UpdateChecker::currentVersion()),
+      dialog);
+  headline->setWordWrap(true);
+  layout->addWidget(headline);
+
+  if (!notes.trimmed().isEmpty()) {
+    auto *notesView = new QTextBrowser(dialog);
+    notesView->setOpenExternalLinks(true);
+    notesView->setMarkdown(notes);
+    notesView->setMinimumSize({560, 320});
+    layout->addWidget(notesView, 1);
   }
 
-  auto *open = box->addButton(tr("&Open Download Page"), QMessageBox::AcceptRole);
-  auto *later = box->addButton(tr("&Not Now"), QMessageBox::RejectRole);
-  auto *never =
-      box->addButton(tr("Never Check for &Updates"), QMessageBox::DestructiveRole);
-  box->setDefaultButton(later);
+  auto *buttons = new QDialogButtonBox(dialog);
+  auto *open =
+      buttons->addButton(tr("&Open Download Page"), QDialogButtonBox::AcceptRole);
+  auto *later = buttons->addButton(tr("&Not Now"), QDialogButtonBox::RejectRole);
+  auto *ignore = buttons->addButton(tr("&Ignore This Version"),
+                                    QDialogButtonBox::ActionRole);
+  auto *never = buttons->addButton(tr("Never Check for &Updates"),
+                                   QDialogButtonBox::DestructiveRole);
+  later->setDefault(true);
+  layout->addWidget(buttons);
 
-  // Non-modal on purpose. A modal box over the window would block the user out
-  // of the app they just launched, and the notice is never urgent enough to
-  // earn that.
-  box->setWindowModality(Qt::NonModal);
-
-  connect(open, &QAbstractButton::clicked, box, [box, url] {
+  connect(open, &QAbstractButton::clicked, dialog, [dialog, url] {
     QDesktopServices::openUrl(QUrl(url));
-    box->accept();
+    dialog->accept();
   });
-  connect(later, &QAbstractButton::clicked, box, &QDialog::accept);
-  connect(never, &QAbstractButton::clicked, box, [this, box] {
-    // Same construction-order guarantee as the menu handlers above.
+  connect(later, &QAbstractButton::clicked, dialog, &QDialog::accept);
+  connect(ignore, &QAbstractButton::clicked, dialog, [this, dialog, tag] {
+    updates_->setIgnoredVersion(tag);
+    dialog->accept();
+  });
+  connect(never, &QAbstractButton::clicked, dialog, [this, dialog] {
     updates_->setDisabled(true);
     autoUpdateAction_->setChecked(false);
-    box->accept();
+    dialog->accept();
   });
-  // Each button closes the box above, and closing it with the window X emits
-  // finished too, so this is the single teardown path.
-  connect(box, &QDialog::finished, box, &QObject::deleteLater);
+  connect(dialog, &QDialog::finished, dialog, &QObject::deleteLater);
 
-  box->show();
+  dialog->show();
 }
 
 void MainWindow::onUpdateCheckFinished(app::CheckOutcome outcome) {
-  // UpdateAvailable is already on screen as a dialog, and Suppressed means the
-  // user has said what they want. Neither needs a status-bar line.
-  // The manual/automatic distinction applies to one check only, so the flag is
-  // consumed here on every outcome. Leaving it set when an update was found
-  // (or suppressed) leaked "manual" into the next automatic check, which then
-  // complained about an unreachable GitHub exactly like a asked-for check.
   const bool wasManual = updateCheckManual_;
   updateCheckManual_ = false;
 
@@ -571,9 +1053,6 @@ void MainWindow::onUpdateCheckFinished(app::CheckOutcome outcome) {
       outcome != app::CheckOutcome::Unreachable)
     return;
 
-  // A failure on the automatic schedule says nothing. Corporate proxies that
-  // inspect TLS break this check for whole offices, and a status-bar complaint
-  // every day that nobody can act on only teaches people to ignore the bar.
   if (!wasManual)
     return;
 
@@ -582,24 +1061,14 @@ void MainWindow::onUpdateCheckFinished(app::CheckOutcome outcome) {
         tr("LucidGrasp %1 is up to date.")
             .arg(app::UpdateChecker::currentVersion()),
         6000);
+  else if (outcome == app::CheckOutcome::Suppressed)
+    statusBar()->showMessage(
+        tr("The latest version is being ignored."), 6000);
   else
     statusBar()->showMessage(tr("Could not reach GitHub to check for updates."),
                              6000);
 }
 
-// Both pickers are deliberately left on the platform's own dialog wherever one
-// exists, so the popup carries the desktop's real colours. Forcing Qt's
-// built-in dialog instead was a mistake: it only ever helped after someone had
-// manually overridden the theme away from the system, and it cost the macOS
-// QuickLook previews and security-scoped bookmarks, and the Windows shell
-// dialog, on every single use.
-//
-// The theme is still pushed onto the instance, because that covers the case
-// where no native dialog exists at all. Qt then falls back to its own built-in
-// picker, which is a plain top-level window and so inherits neither this
-// window's stylesheet nor its palette. Unstyled, it renders as a white dialog
-// carrying our near-white text -- unreadable. This costs nothing when a native
-// dialog is used, since Qt ignores the palette for one.
 QString MainWindow::askForDirectory(const QString &title) {
   QFileDialog dlg(this, title);
   dlg.setFileMode(QFileDialog::Directory);
@@ -620,10 +1089,6 @@ QString MainWindow::askForFile(const QString &title,
 }
 
 void MainWindow::browseLibrary() {
-  // A search worker iterates index_; the picker below would lead straight to
-  // tryLoadIndex() replacing the vector underneath it. The button is gated in
-  // updateActions(), but the menu action shares this slot, so the guard has to
-  // live here rather than on the widget.
   if (indexing_ || searching_)
     return;
 
@@ -636,15 +1101,10 @@ void MainWindow::browseLibrary() {
 }
 
 void MainWindow::tryLoadIndex(const QString &dir) {
-  // Same guard as browseLibrary(), at the mutation site: index_.clear() and
-  // index_.load() below rewrite the vector a search worker is reading. Cheap
-  // defence in depth for any future caller that forgets to check.
   if (indexing_ || searching_)
     return;
 
   results_->clear();
-  // Fall back to the pre-1.1 cache location so existing installs keep
-  // working; the next reindex writes to the new path.
   const QString path = core::defaultIndexPath(dir);
   const QString legacy = core::legacyIndexPath(dir);
   const QString load = QFile::exists(path) ? path : legacy;
@@ -670,7 +1130,7 @@ void MainWindow::startIndex() {
     return;
   }
   if (searching_)
-    return; // a search holds index_; let it finish or stop it first
+    return;
   const QString root = libEdit_->text();
   if (root.isEmpty())
     return;
@@ -687,10 +1147,6 @@ void MainWindow::startIndex() {
   statusBar()->showMessage(QStringLiteral("Indexing…"));
 
   worker_ = std::thread([this, root] {
-    // Nothing may escape this thread body. An exception crossing a
-    // std::thread calls std::terminate, and OpenCV throws cv::Exception on
-    // malformed input -- which is exactly what a whole-filesystem scan of
-    // untrusted files hands it. Report the failure instead of vanishing.
     std::unique_ptr<core::ImageIndex> idx;
     bool ok = false;
     QString error;
@@ -713,8 +1169,6 @@ void MainWindow::startIndex() {
       error = QStringLiteral("unknown error");
     }
 
-    // Handed over by pointer: the entry vector is no longer deep-copied
-    // twice (once into the queued event, once for a by-value parameter).
     QMetaObject::invokeMethod(
         this,
         [this, ok, error, idx = std::move(idx)]() mutable {
@@ -726,14 +1180,11 @@ void MainWindow::startIndex() {
 
 void MainWindow::onIndexProgress(int done, int total, const QString &current) {
   if (total <= 0) {
-    // Discovery phase: the total file count is not known yet.
-    progress_->setRange(0, 0); // busy indicator
+    progress_->setRange(0, 0);
     stats_->setText(QStringLiteral("Scanning for images…\n%1").arg(current));
     return;
   }
   progress_->setRange(0, 100);
-  // done * 100 in int overflows past ~21.4M files (a whole-disk archive can
-  // get close); evaluate in 64 bits, then narrow a value that is in range.
   progress_->setValue(int(qint64(done) * 100 / total));
   stats_->setText(QStringLiteral("Indexing %1/%2\n%3")
                       .arg(done)
@@ -786,16 +1237,12 @@ void MainWindow::stopIndex() {
   cancel_ = true;
   indexBtn_->setText(QStringLiteral("Stopping..."));
   setBusy(true);
-  indexBtn_->setEnabled(false); // stay disabled until the worker reports back
+  indexBtn_->setEnabled(false);
   statusBar()->showMessage(
       QStringLiteral("Stopping... partial index will be discarded"), 4000);
 }
 
 void MainWindow::browseQuery() {
-  // The picker opens a modal native dialog, which is wrong UX while a search
-  // or index is running, and replacing the query mid-search is at best
-  // confusing. Gated here as well as in updateActions(), the same way as
-  // browseLibrary(), so both File menu actions are covered either way.
   if (indexing_ || searching_)
     return;
 
@@ -828,13 +1275,15 @@ void MainWindow::browseQuery() {
 }
 
 void MainWindow::showPreview(const QString &path) {
-  const QPixmap pm(path);
-  if (pm.isNull()) {
+  QImageReader reader(path);
+  reader.setAutoTransform(true);
+  const QImage img = reader.read();
+  if (img.isNull()) {
     preview_->setText(QStringLiteral("cannot load"));
     return;
   }
-  preview_->setPixmap(pm.scaled(preview_->size(), Qt::KeepAspectRatio,
-                                Qt::SmoothTransformation));
+  preview_->setPixmap(QPixmap::fromImage(img).scaled(
+      preview_->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
 }
 
 void MainWindow::startSearch() {
@@ -865,13 +1314,8 @@ void MainWindow::startSearch() {
   statusBar()->showMessage(QStringLiteral("Searching…"));
   searchTimer_.start();
 
-  // Runs off the GUI thread so the window stays responsive and cancellable
-  // no matter how large the library is. index_ is only read here, and the
-  // UI is locked out until onSearchFinished, so there is no shared mutation.
   const double threshold = thresholdSpin_->value() / 100.0;
   searchWorker_ = std::thread([this, query, threshold] {
-    // Same rule as the index worker: an escaping exception would abort the
-    // process, and this path decodes images from arbitrary paths.
     std::vector<core::SearchResult> results;
     bool ok = false;
     QString error;
@@ -914,11 +1358,9 @@ void MainWindow::stopSearch() {
 
 void MainWindow::onSearchProgress(int done, int total) {
   if (total > 0) {
-    // Same 64-bit guard as onIndexProgress; this is also called from stage one
-    // of the search now (the in-memory prefilter over the whole index), so the
-    // label must not claim a comparison is running when it is only ranking.
-    progress_->setValue(int(qint64(done) * 100 / total));
-    stats_->setText(QStringLiteral("Searching %1/%2").arg(done).arg(total));
+    const int pct = int(qint64(done) * 100 / total);
+    progress_->setValue(pct);
+    stats_->setText(QStringLiteral("Searching %1%").arg(pct));
   }
 }
 
@@ -938,9 +1380,14 @@ void MainWindow::onSearchFinished(bool ok,
     statusBar()->showMessage(QStringLiteral("Search failed"), 4000);
     return;
   }
-  if (!ok || cancel_) {
+  if (cancel_) {
     stats_->setText(QStringLiteral("Search cancelled."));
     statusBar()->showMessage(QStringLiteral("Search cancelled"), 4000);
+    return;
+  }
+  if (!ok) {
+    stats_->setText(QStringLiteral("The query image could not be read."));
+    statusBar()->showMessage(QStringLiteral("Query image unreadable"), 4000);
     return;
   }
   if (results.empty()) {
@@ -960,15 +1407,10 @@ void MainWindow::onSearchFinished(bool ok,
 void MainWindow::renderResults(const std::vector<core::SearchResult> &results) {
   results_->clear();
   for (const auto &r : results) {
-    // core::search already applied the threshold, and it is the only place
-    // that decides what a match is. Re-filtering here used the live widget
-    // value, which made the GUI a second source of truth that could disagree
-    // with the CLI.
     const int pct = int(r.score * 100.0 + 0.5);
 
-    // Decode straight to thumbnail size rather than loading the full
-    // image, which matters when results can be very large photographs.
     QImageReader reader(r.absPath);
+    reader.setAutoTransform(true);
     const QSize native = reader.size();
     if (native.isValid() && !native.isEmpty())
       reader.setScaledSize(native.scaled(QSize(128, 128), Qt::KeepAspectRatio));
@@ -981,6 +1423,7 @@ void MainWindow::renderResults(const std::vector<core::SearchResult> &results) {
             .arg(pct)
             .arg(QFileInfo(r.absPath).fileName()));
     item->setData(Qt::UserRole, r.absPath);
+    item->setData(Qt::UserRole + 1, r.relPath);
     item->setToolTip(
         r.absPath + QStringLiteral("\nscore: ") +
         QString::number(r.score, 'f', 3) +
@@ -990,9 +1433,95 @@ void MainWindow::renderResults(const std::vector<core::SearchResult> &results) {
   }
 }
 
+QListWidgetItem *MainWindow::currentResult() const {
+  QListWidgetItem *item = results_->currentItem();
+  if (!item || item->data(Qt::UserRole).toString().isEmpty())
+    return nullptr;
+  return item;
+}
+
+void MainWindow::revealResult() {
+  QListWidgetItem *item = currentResult();
+  if (!item)
+    return;
+  const QString path = item->data(Qt::UserRole).toString();
+
+  const QDir dir = QFileInfo(path).absoluteDir();
+  if (!dir.exists()) {
+    QMessageBox::warning(this, QStringLiteral("Cannot show file"),
+                         QStringLiteral("The folder is gone:\n%1")
+                             .arg(QDir::toNativeSeparators(dir.path())));
+    return;
+  }
+
+  QPointer<MainWindow> self(this);
+  ui::revealInFileManager(path, [self, dir](ui::RevealOutcome outcome) {
+    if (!self)
+      return;
+    switch (outcome) {
+      case ui::RevealOutcome::Selected:
+        break;
+      case ui::RevealOutcome::FolderOnly:
+        self->statusBar()->showMessage(
+            QStringLiteral("Opened %1, but this file manager cannot preselect "
+                           "a file.")
+                .arg(QDir::toNativeSeparators(dir.path())),
+            6000);
+        break;
+      case ui::RevealOutcome::Failed:
+        self->statusBar()->showMessage(
+            QStringLiteral("Could not open a file manager."), 6000);
+        break;
+    }
+  });
+}
+
+void MainWindow::trashResult() {
+  QListWidgetItem *item = currentResult();
+  if (!item)
+    return;
+  const QString path = item->data(Qt::UserRole).toString();
+  const QString name = QFileInfo(path).fileName();
+
+  const auto answer = QMessageBox::question(
+      this, QStringLiteral("Move to trash"),
+      QStringLiteral("Move this file to the trash?\n\n%1").arg(name),
+      QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+  if (answer != QMessageBox::Yes)
+    return;
+
+  QString error;
+  if (!ui::moveToTrash(path, &error)) {
+    QMessageBox::critical(this, QStringLiteral("Cannot delete"),
+                          error.isEmpty()
+                              ? QStringLiteral("The file could not be moved to "
+                                               "the trash.")
+                              : error);
+    return;
+  }
+
+  index_.removeEntry(item->data(Qt::UserRole + 1).toString());
+
+  const int row = results_->row(item);
+  delete results_->takeItem(row);
+
+  const bool cached = index_.save(core::defaultIndexPath(libEdit_->text()));
+
+  statusBar()->showMessage(
+      cached ? QStringLiteral("Moved to trash: %1").arg(name)
+             : QStringLiteral("Moved to trash: %1 (index cache not saved)")
+                   .arg(name),
+      5000);
+  updateResultActions();
+}
+
+void MainWindow::updateResultActions() {
+  const bool haveResult = currentResult() != nullptr;
+  revealBtn_->setEnabled(haveResult);
+  trashBtn_->setEnabled(haveResult);
+}
+
 void MainWindow::setBusy(bool busy) {
-  // While a worker holds index_ or the result set, the inputs that would
-  // invalidate them are locked out.
   browseLibBtn_->setEnabled(!busy);
   browseQueryBtn_->setEnabled(!busy);
   thresholdSpin_->setEnabled(!busy);
@@ -1007,35 +1536,28 @@ void MainWindow::openResult(QListWidgetItem *item) {
 
 void MainWindow::updateActions() {
   const bool busy = indexing_ || searching_;
+  const bool canAct = !busy && currentResult() != nullptr;
+  revealBtn_->setEnabled(canAct);
+  trashBtn_->setEnabled(canAct);
   const bool canIndex = !busy && !libEdit_->text().isEmpty();
   indexBtn_->setEnabled(indexing_ || canIndex);
   browseLibBtn_->setEnabled(!busy);
   browseQueryBtn_->setEnabled(!busy);
   searchBtn_->setEnabled(
       busy ? searching_ : (!index_.empty() && !queryEdit_->text().isEmpty()));
-  // The File menu mirrors the browse buttons. These actions replace index_
-  // via browseLibrary(), so they must be locked out for exactly the same
-  // duration as the button, or a search worker reads freed memory.
   if (indexAction_)
     indexAction_->setEnabled(!busy);
   if (queryAction_)
     queryAction_->setEnabled(!busy);
 }
 
-// ----- theme ---------------------------------------------------------------
-
 bool MainWindow::systemPrefersDark() const {
-  // QStyleHints::colorScheme() is the correct answer, but it only exists from
-  // Qt 6.5. The luminance check below works on every Qt 6 and agrees with it on
-  // the platforms that report a scheme at all, so the version guard is belt and
-  // braces rather than the primary mechanism.
 #if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
   const Qt::ColorScheme scheme = QGuiApplication::styleHints()->colorScheme();
   if (scheme == Qt::ColorScheme::Dark)
     return true;
   if (scheme == Qt::ColorScheme::Light)
     return false;
-  // Unknown, or a Qt too old to answer, falls through to the luminance check.
 #endif
   return relativeLuminance(desktopPalette_.color(QPalette::Window)) <
          relativeLuminance(desktopPalette_.color(QPalette::WindowText));
@@ -1050,12 +1572,56 @@ void MainWindow::setDark(bool dark) {
 
 void MainWindow::toggleTheme() { setDark(!darkMode_); }
 
+QIcon MainWindow::paintTrashGlyph(int logicalSize, const QColor &ink,
+                                 const QColor &faded) {
+  const auto draw = [&](const QColor &colour) {
+    const qreal s = logicalSize;
+    const qreal dpr = qApp->devicePixelRatio();
+    QPixmap bin(qRound(s * dpr), qRound(s * dpr));
+    bin.setDevicePixelRatio(dpr);
+    bin.fill(Qt::transparent);
+
+    QPainter p(&bin);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.scale(dpr, dpr);
+    p.setPen(QPen(colour, qMax(1.0, s * 0.09)));
+    p.setBrush(Qt::NoBrush);
+    p.drawLine(QPointF(s * 0.34, s * 0.30), QPointF(s * 0.40, s * 0.16));
+    p.drawLine(QPointF(s * 0.40, s * 0.16), QPointF(s * 0.60, s * 0.16));
+    p.drawLine(QPointF(s * 0.60, s * 0.16), QPointF(s * 0.66, s * 0.30));
+    p.drawLine(QPointF(s * 0.10, s * 0.30), QPointF(s * 0.90, s * 0.30));
+    p.drawLine(QPointF(s * 0.18, s * 0.30), QPointF(s * 0.26, s * 0.88));
+    p.drawLine(QPointF(s * 0.26, s * 0.88), QPointF(s * 0.74, s * 0.88));
+    p.drawLine(QPointF(s * 0.74, s * 0.88), QPointF(s * 0.82, s * 0.30));
+    p.drawLine(QPointF(s * 0.40, s * 0.46), QPointF(s * 0.42, s * 0.72));
+    p.drawLine(QPointF(s * 0.60, s * 0.46), QPointF(s * 0.58, s * 0.72));
+    p.end();
+    return bin;
+  };
+
+  QIcon bin;
+  bin.addPixmap(draw(ink), QIcon::Normal, QIcon::On);
+  bin.addPixmap(draw(faded), QIcon::Disabled, QIcon::On);
+  return bin;
+}
+
+void MainWindow::updateResultIcons() {
+  QFileIconProvider provider;
+  revealBtn_->setIcon(provider.icon(QFileIconProvider::Folder));
+
+  const bool dark = relativeLuminance(palette().color(QPalette::Window)) <
+                    relativeLuminance(palette().color(QPalette::WindowText));
+  const QColor ink =
+      dark ? QColor(0xE5, 0x6A, 0x6A) : QColor(0xC0, 0x36, 0x2C);
+  const QColor faded = mixToward(ink, palette().color(QPalette::Window), 0.55);
+  trashBtn_->setIcon(
+      paintTrashGlyph(trashBtn_->iconSize().width(), ink, faded));
+}
+
 void MainWindow::updateThemeGlyph() {
   themeToggleBtn_->setIcon(
       paintThemeGlyph(darkMode_, palette().color(QPalette::Link),
                       themeToggleBtn_->iconSize().width()));
-  // The glyph shows the current theme; the tooltip has to name the other one,
-  // because an icon on its own gives no hint of what clicking will do.
   themeToggleBtn_->setToolTip(darkMode_
                                   ? QStringLiteral("Switch to light mode")
                                   : QStringLiteral("Switch to dark mode"));
@@ -1065,15 +1631,6 @@ void MainWindow::equalizePanelHeights() {
   if (!libGroup_ || !queryGroup_ || panelsSized_)
     return;
 
-  // Measured exactly once, before anything is pinned. A QGroupBox's size hint
-  // is floored by its own minimum height, so reading it back after pinning
-  // would be a ratchet: the pair could only ever grow, and the taller panel
-  // would drag the shorter one up on every re-measure.
-  //
-  // Fixed heights rather than minimums, because a fixed height also raises
-  // the window's minimum size hint. The two panels therefore cannot be
-  // squeezed to different heights by a short window -- the window simply
-  // refuses to become shorter than they are.
   const int tallest = std::max(libGroup_->sizeHint().height(),
                                queryGroup_->sizeHint().height());
   libGroup_->setFixedHeight(tallest);
@@ -1083,30 +1640,13 @@ void MainWindow::equalizePanelHeights() {
 
 void MainWindow::showEvent(QShowEvent *event) {
   QMainWindow::showEvent(event);
-  // Deferred to here rather than the constructor: sizeHint() is only
-  // trustworthy once the widget has its final font metrics, which arrive
-  // after polish.
   equalizePanelHeights();
 
-  // The update check goes out from here rather than the constructor because it
-  // is a network round trip, and the window must not wait on it to appear. The
-  // delay is not for the network's sake: it lets the window paint first, so an
-  // available update raises its box over a finished window instead of a white
-  // flash. The checker applies its own opt-out and daily throttle, so this
-  // fires on every launch and costs nothing on all but one.
   QTimer::singleShot(500, this,
                      [this] { updates_->checkOnStartup(); });
 }
 
 void MainWindow::applyThemeTo(QWidget *target) const {
-  // Every colour below comes out of the palette the desktop reports. When the
-  // toggle agrees with the desktop, that palette is used exactly as given. When
-  // it disagrees -- someone has overridden the theme by hand -- the opposite
-  // scheme is built from it, because Qt 6.4 can neither report nor hold a
-  // palette for the scheme the desktop is not currently using.
-  // desktopPalette_, not QGuiApplication::palette(): the latter has by now been
-  // overwritten with the derived theme, so reading it would make this a
-  // derivation of the previous derivation.
   const bool osIsDark =
       relativeLuminance(desktopPalette_.color(QPalette::Window)) <
       relativeLuminance(desktopPalette_.color(QPalette::WindowText));
@@ -1142,8 +1682,6 @@ QLineEdit, QSpinBox {
 }
 QLineEdit:read-only { color: @muted; }
 QLineEdit:focus, QSpinBox:focus { border-color: @accent; }
-/* The arrows are left to Qt to draw from the palette rather than replaced with
-   images, so they stay legible in both themes. */
 QSpinBox { padding-right: 20px; }
 QSpinBox::up-button, QSpinBox::down-button {
     subcontrol-origin: border; width: 18px; background: transparent;
@@ -1175,10 +1713,7 @@ QPushButton:disabled { color: @muted; border-color: @border; }
     background: @disabled; color: @muted; border-color: @border;
 }
 
-/* The general button rule pads 6px/14px for a text label. This one holds only
-   an icon at a fixed square size, so the padding has to go or it squeezes the
-   glyph and inflates the widget. */
-#themeToggleBtn { padding: 0; }
+#themeToggleBtn, #revealBtn, #trashBtn { padding: 0; }
 
 QProgressBar {
     background: @field; border: 1px solid @border; border-radius: 6px;
@@ -1207,8 +1742,6 @@ QScrollBar::handle:horizontal {
 QScrollBar::add-line, QScrollBar::sub-line { height: 0; width: 0; }
 QScrollBar::add-page, QScrollBar::sub-page { background: none; }
 
-/* A popup menu is a top-level widget with its own surface, so it is given the
-   panel colour explicitly rather than inheriting the window's. */
 QMenuBar {
     background: @panel; color: @text; border-bottom: 1px solid @border;
 }
@@ -1232,11 +1765,6 @@ QToolTip {
 }
 )CSS");
 
-  // One substitution table keeps light and dark differing only by colour, so
-  // the layout above cannot drift out of sync between the two themes.
-  // Longest token first: @accentHover begins with @accent, so replacing
-  // @accent before @accentHover would leave "#308cc6Hover" in the sheet, which
-  // Qt parses as an unknown colour and drops silently.
   QVector<QPair<QString, QColor>> vars = {
       {QStringLiteral("@window"), c.window},
       {QStringLiteral("@panel"), c.panel},
@@ -1267,11 +1795,6 @@ QToolTip {
 
   target->setStyleSheet(qss);
 
-  // The stylesheet covers the widgets it names, but parts Qt draws natively
-  // from the palette -- spin box arrows, and anything in a dialog -- are
-  // unaffected by it and would come out dark-on-dark. Setting the palette to
-  // match closes that gap, and covers the file and message dialogs too,
-  // which inherit this palette as children of the window.
   QPalette pal;
   pal.setColor(QPalette::Window, c.window);
   pal.setColor(QPalette::WindowText, c.text);
@@ -1290,24 +1813,77 @@ QToolTip {
   pal.setColor(QPalette::Mid, c.border);
   pal.setColor(QPalette::Dark, c.border.darker(140));
   pal.setColor(QPalette::Shadow, Qt::black);
-  // Disabled text is the muted colour, so a greyed control still reads as
-  // disabled rather than as a differently-coloured enabled one.
   pal.setColor(QPalette::Disabled, QPalette::WindowText, c.muted);
   pal.setColor(QPalette::Disabled, QPalette::Text, c.muted);
   pal.setColor(QPalette::Disabled, QPalette::ButtonText, c.muted);
   target->setPalette(pal);
 }
 
+void MainWindow::dragEnterEvent(QDragEnterEvent *event) {
+  if (event->mimeData()->hasUrls()) {
+    event->acceptProposedAction();
+  }
+}
+
+void MainWindow::dropEvent(QDropEvent *event) {
+  const QList<QUrl> urls = event->mimeData()->urls();
+  if (urls.isEmpty())
+    return;
+
+  QString libraryDir;
+  QString queryImage;
+  for (const QUrl &url : urls) {
+    if (!url.isLocalFile())
+      continue;
+    const QString path = url.toLocalFile();
+    const QFileInfo info(path);
+    if (!info.exists())
+      continue;
+
+    if (info.isDir()) {
+      if (libraryDir.isEmpty())
+        libraryDir = path;
+    } else if (info.isFile() && core::isSupportedImage(path)) {
+      if (queryImage.isEmpty())
+        queryImage = path;
+    }
+  }
+
+  if (!libraryDir.isEmpty()) {
+    libEdit_->setText(libraryDir);
+    tryLoadIndex(libraryDir);
+  }
+  if (!queryImage.isEmpty()) {
+    queryEdit_->setText(queryImage);
+    showPreview(queryImage);
+    updateActions();
+  }
+  event->acceptProposedAction();
+}
+
 void MainWindow::applyTheme() {
   applyThemeTo(this);
 
-  // A palette set on a widget propagates only to that widget's children. A
-  // dialog is a top-level window with no parent, so it keeps the platform
-  // default palette -- a white file dialog -- while still picking up our
-  // stylesheet's near-white text, which is how the popup ended up white on
-  // white. Setting it application-wide covers every dialog, including the
-  // message boxes, which have the same problem.
   qApp->setPalette(palette());
 
   updateThemeGlyph();
+  updateResultIcons();
+}
+
+bool MainWindow::eventFilter(QObject *watched, QEvent *event) {
+  if (watched == results_ && event->type() == QEvent::KeyPress) {
+    auto *keyEvent = static_cast<QKeyEvent *>(event);
+    if (keyEvent->key() == Qt::Key_Return || keyEvent->key() == Qt::Key_Enter) {
+      QListWidgetItem *item = currentResult();
+      if (item)
+        openResult(item);
+      return true;
+    }
+    if (keyEvent->key() == Qt::Key_Delete) {
+      if (currentResult())
+        trashResult();
+      return true;
+    }
+  }
+  return QMainWindow::eventFilter(watched, event);
 }

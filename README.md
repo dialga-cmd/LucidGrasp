@@ -1,8 +1,21 @@
 # LucidGrasp
 
+<p align="center">
+  <a href="https://github.com/dialga-cmd/LucidGrasp/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/dialga-cmd/LucidGrasp/total"></a>
+  <a href="https://github.com/dialga-cmd/LucidGrasp/releases"><img alt="GitHub Releases" src="https://img.shields.io/github/v/release/dialga-cmd/LucidGrasp"></a>
+  <a href="https://github.com/dialga-cmd/LucidGrasp/releases/latest/download/lucidgrasp-linux-x64.tar.gz"><img alt="Available on Linux" src="https://img.shields.io/badge/Linux-available-brightgreen"></a>
+  <a href="https://github.com/dialga-cmd/LucidGrasp/releases/latest/download/LucidGrasp_Setup_x64.exe"><img alt="Available on Windows" src="https://img.shields.io/badge/Windows-available-brightgreen"></a>
+  <a href="https://github.com/dialga-cmd/LucidGrasp/releases"><img alt="Available on macOS" src="https://img.shields.io/badge/macOS-available-brightgreen"></a>
+  <a href="https://github.com/dialga-cmd/LucidGrasp/releases/latest/download/LucidGrasp-x86_64.AppImage"><img alt="AppImage" src="https://img.shields.io/badge/AppImage-available-brightgreen"></a>
+  <a href="https://build.opensuse.org/package/show/home:dialga-cmd/lucidgrasp"><img alt="Published on OBS" src="https://img.shields.io/badge/OBS-published-brightgreen"></a>
+  <a href="https://launchpad.net/~realdialga/+archive/ubuntu/lucidgrasp"><img alt="Published on Launchpad PPA" src="https://img.shields.io/badge/Launchpad%20PPA-published-brightgreen"></a>
+  <a href="https://snapcraft.io/lucidgrasp"><img alt="Published on Snap Store" src="https://img.shields.io/badge/Snap%20Store-published-brightgreen"></a>
+  <a href="https://github.com/dialga-cmd/lucidgrasp-bucket"><img alt="Published on Scoop" src="https://img.shields.io/badge/Scoop-published-brightgreen"></a>
+</p>
+
 LucidGrasp is a high performance image search engine built to identify and match visual media. It operates by breaking down images at the pixel level, analyzing their structural patterns, color distributions, and keypoint features to produce a precise similarity percentage between any two images. It is built with C++ and OpenCV for raw speed, and Qt6 for the graphical interface.
 
-LucidGrasp runs on Linux and Windows.
+LucidGrasp runs on Linux, Windows and macOS.
 
 ### Current Capabilities
 
@@ -12,7 +25,9 @@ Both indexing and searching run on background threads, so the window stays respo
 
 The window takes its colours from the operating system. Every surface, accent, border and text colour is read out of the desktop palette rather than chosen by hand, so LucidGrasp follows the system light or dark scheme along with your accent colour. A square button in the top right switches between the two.
 
-On launch the application checks GitHub for a newer release and tells you if there is one. It does this at most once a day, and never silently: you can turn it off permanently, or ask for it on demand, from the Help menu. It only reads the release page — nothing is ever downloaded or installed without you asking.
+Every time the application is opened it checks GitHub for a newer release and shows a dialog when one is available, unless automatic checks are turned off. 'Check for Updates...' and 'Check for Updates Automatically' live in the Updates menu, and turning the automatic option back on runs a check right away. The checker only reads the release page — nothing is ever downloaded or installed without you asking.
+
+The Help menu gets you in touch with the project: 'Report an Issue' and 'Request a Feature' open a pre-filled New Issue form on GitHub, 'Contact the Developer' opens your mail application, 'Privacy Policy...' explains exactly what the application does with your data, and 'About LucidGrasp' shows the installed version. The complete policy is also documented in [PRIVACY.md](PRIVACY.md).
 
 ### Surface Scan
 
@@ -34,7 +49,7 @@ Color histogram intersection accounts for 20% of the final score. Both images ar
 
 Those three percentages weight the OpenCV comparison against each other. The score a result is finally shown with blends that comparison with the cheap hash ranking from stage one, at 80% to 20%, which is why an indexed file that has since changed on disk is refreshed before it is scored rather than being ranked against hashes for pixels that are no longer there.
 
-Running those three algorithms against every indexed image would make each search slower the more you index, so searching happens in two stages. Every image is first ranked using the perceptual and difference hashes already stored in the index, which is pure in-memory arithmetic and touches no files. Only the top 256 candidates are then decoded and put through the full OpenCV comparison above. Because the expensive half of the work is capped, the time a search spends decoding and comparing images does not grow as the library does, while the top of the ranking stays the same as a full scan would produce. Ranking the shortlist is still a linear pass over the index, but it is arithmetic on data already in memory rather than image decoding, so it stays in the low milliseconds even for a whole-filesystem library.
+Running those three algorithms against every indexed image would make each search slower the more you index, so searching happens in two stages. Every image is first ranked using the perceptual and difference hashes already stored in the index, which is pure in-memory arithmetic and touches no files. The highest-ranked candidates - at least 256, scaling up to a 2048 ceiling as the library grows - are then decoded and put through the full OpenCV comparison above. Because the expensive half of the work is capped, the time a search spends decoding and comparing images does not grow as the library does, while the top of the ranking stays the same as a full scan would produce. Ranking the shortlist is still a linear pass over the index, but it is arithmetic on data already in memory rather than image decoding, so it stays in the low milliseconds even for a whole-filesystem library.
 
 ### Planned Expansion
 
@@ -103,13 +118,13 @@ The index is cached per library in `~/.local/share/LucidGrasp/indexes/`, outside
 
 You will need the MSVC Build Tools or Visual Studio, CMake, Qt6, and OpenCV pre built binaries for Windows.
 
-The Qt version is the constraint worth knowing about first. Qt 6.5 LTS ships MSVC 2019 (the `v142` toolset) for Windows desktop, and no `win64_msvc2022_64` build exists for any 6.5.x release. If you try to install Qt through the Qt Online Installer and pick the MSVC 2022 64 bit component, aqt will fail to find the packages. Use the MSVC 2019 64 bit component instead, and build with the `v142` toolset.
+The Qt version is the constraint worth knowing about first. Use the Qt 6.8 LTS release, which ships the MSVC 2022 (the `v143` toolset) build for Windows desktop. Qt 6.5 only shipped MSVC 2019 builds, so it is no longer used.
 
-1. Install Qt6 using the official Qt Online Installer. Select the MSVC 2019 64 bit component during installation.
+1. Install Qt6 using the official Qt Online Installer. Select the MSVC 2022 64-bit component during installation.
 
-2. Download the OpenCV Windows release from the official OpenCV GitHub releases page. Extract it to a known location (for example `C:\opencv`).
+2. Download the OpenCV 4.14.0 Windows release from the official OpenCV GitHub releases page. Extract it to a known location (for example `C:\opencv`).
 
-3. Open a Developer Command Prompt for the 2019 toolset and run:
+3. Open a Developer Command Prompt for the 2022 toolset and run:
 
 ```cmd
 git clone https://github.com/dialga-cmd/LucidGrasp.git
@@ -126,7 +141,7 @@ nmake
 windeployqt --release LucidGrasp.exe
 ```
 
-Then copy the OpenCV world DLL from `C:\opencv\opencv\build\x64\vc16\bin\opencv_world*.dll` into the same folder. The application is now ready to run.
+Then copy the OpenCV world DLL from the `bin` directory under `C:\opencv\opencv\build\x64\` (for example `vc16\bin\opencv_world*.dll`) into the same folder. The application is now ready to run.
 
 ### System Installation (Linux Only)
 
@@ -142,3 +157,21 @@ To uninstall the application, run this command from the `build` directory:
 ```bash
 sudo xargs rm < install_manifest.txt
 ```
+
+### Documentation
+
+**Legal**
+
+- [Legal Notices](LEGAL.md) — index of every legal document in the project.
+- [Terms of Use](TERMS.md) — the rules for using the Software.
+- [Privacy Policy](PRIVACY.md) — what LucidGrasp does and does not send anywhere.
+- [Warranty Disclaimer](DISCLAIMER.md) — the "as is" guarantee and the limits of liability.
+- [Acceptable Use](ACCEPTABLE_USE.md) — lawful and authorized use.
+- [License](LICENSE) — the MIT License.
+
+**Project**
+
+- [Contributing Guide](CONTRIBUTING.md) — building, testing, and code conventions.
+- [Security Policy](SECURITY.md) — how to report a vulnerability.
+- [Support](SUPPORT.md) — where to get help.
+- [Changelog](CHANGELOG.md) — release history.
