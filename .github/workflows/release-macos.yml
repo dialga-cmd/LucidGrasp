@@ -4,6 +4,7 @@ on:
   release:
     types: [published]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -15,12 +16,12 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
     - name: Install Qt6
       uses: jurplel/install-qt-action@v4
       with:
-        version: '6.5.*'
+        version: '6.8.3'
         host: 'mac'
         target: 'desktop'
 
@@ -184,6 +185,6 @@ jobs:
 
     - name: Upload Release Asset
       if: github.event_name == 'release'
-      uses: softprops/action-gh-release@v2
+      uses: softprops/action-gh-release@v3
       with:
         files: lucidgrasp-macos-*.dmg

@@ -61,6 +61,10 @@ DESTDIR=%{buildroot} cmake --install build --prefix %{_prefix}
 %dir /usr/share/doc/lucidgrasp
 
 %changelog
+* Thu Oct 8 2026 dialga-cmd <adityaraj1234@duck.com> - 1.2.5-1
+- Release v1.2.5
+* Thu Oct 8 2026 dialga-cmd <adityaraj1234@duck.com> - 1.2.4-1
+- Release v1.2.4
 * Wed Oct 7 2026 dialga-cmd <adityaraj1234@duck.com> - 1.2.3-1
 - Bump to 1.2.3; install reverse-DNS desktop entry, icon, and AppStream metainfo
 * Tue Oct 6 2026 dialga-cmd <adityaraj1234@duck.com> - 1.2.0-0

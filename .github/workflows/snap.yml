@@ -4,6 +4,10 @@ on:
   release:
     types: [published]
   pull_request:
+  schedule:
+    # Monthly rebuild of the latest release so security updates in the Ubuntu
+    # archive are picked up even when no new release has been cut.
+    - cron: '23 3 1 * *'
   workflow_dispatch:
     inputs:
       publish:
@@ -24,9 +28,25 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - name: Resolve build ref
+        id: ref
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            ref="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName -q .tagName)"
+            if [ -z "$ref" ]; then
+              echo "No GitHub release found to rebuild" >&2
+              exit 1
+            fi
+          else
+            ref="${{ github.event.release.tag_name || github.ref }}"
+          fi
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.release.tag_name || github.ref }}
+          ref: ${{ steps.ref.outputs.ref }}
 
       - name: Build snap
         id: build
@@ -43,7 +63,7 @@ jobs:
 
       - name: Upload snap artifact
         if: github.event_name != 'pull_request'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: snap-${{ github.sha }}
           path: ${{ steps.build.outputs.snap }}
@@ -62,7 +82,7 @@ jobs:
           snap run --shell lucidgrasp -c 'ls -la /tmp/lucidgrasp_selftest_*/library 2>&1'
 
       - name: Publish snap
-        if: github.event_name == 'release' || inputs.publish == true
+        if: github.event_name == 'release' || github.event_name == 'schedule' || inputs.publish == true
         uses: snapcore/action-publish@v1
         env:
           SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}

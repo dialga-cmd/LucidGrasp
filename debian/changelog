@@ -1,3 +1,10 @@
+lucidgrasp (1.2.5-1) unstable; urgency=medium
+
+  * New upstream release 1.2.5.
+  * Refresh build metadata after the 1.2.5 release.
+
+ -- dialga-cmd <adityaraj1234@duck.com>  Thu, 05 Nov 2026 12:00:00 +0000
+
 lucidgrasp (1.2.3-2) unstable; urgency=medium
 
   * Remove debian/compat; debhelper compat level comes from Build-Depends

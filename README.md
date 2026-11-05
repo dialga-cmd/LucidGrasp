@@ -120,11 +120,11 @@ The index is cached per library in `~/.local/share/LucidGrasp/indexes/`, outside
 
 You will need the MSVC Build Tools or Visual Studio, CMake, Qt6, and OpenCV pre built binaries for Windows.
 
-The Qt version is the constraint worth knowing about first. Qt 6.5 LTS ships MSVC 2019 (the `v142` toolset) for Windows desktop, and no `win64_msvc2022_64` build exists for any 6.5.x release. If you try to install Qt through the Qt Online Installer and pick the MSVC 2022 64 bit component, aqt will fail to find the packages. Use the MSVC 2019 64 bit component instead, and build with the `v142` toolset.
+The Qt version is the constraint worth knowing about first. Use the Qt 6.8 LTS release, which ships the MSVC 2022 (the `v143` toolset) build for Windows desktop. Qt 6.5 only shipped MSVC 2019 builds, so it is no longer used.
 
-1. Install Qt6 using the official Qt Online Installer. Select the MSVC 2019 64 bit component during installation.
+1. Install Qt6 using the official Qt Online Installer. Select the MSVC 2022 64-bit component during installation.
 
-2. Download the OpenCV Windows release from the official OpenCV GitHub releases page. Extract it to a known location (for example `C:\opencv`).
+2. Download the OpenCV 4.14.0 Windows release from the official OpenCV GitHub releases page. Extract it to a known location (for example `C:\opencv`).
 
 3. Clone the repository, then fetch the prebuilt ONNX Runtime for Windows
 (run this from Git Bash, which ships with Git for Windows):
@@ -135,7 +135,7 @@ cd LucidGrasp
 ./fetch-onnxruntime.sh
 ```
 
-4. Open a Developer Command Prompt for the 2019 toolset and run:
+4. Open a Developer Command Prompt for the 2022 toolset and run:
 
 ```cmd
 mkdir build
@@ -150,7 +150,7 @@ nmake
 windeployqt --release LucidGrasp.exe
 ```
 
-Then copy the OpenCV world DLL from `C:\opencv\opencv\build\x64\vc16\bin\opencv_world*.dll` and the ONNX Runtime DLL from `third_party\onnxruntime\lib\onnxruntime.dll` into the same folder. The application is now ready to run.
+Then copy the OpenCV world DLL from the `bin` directory under `C:\opencv\opencv\build\x64\` (for example `vc16\bin\opencv_world*.dll`) and the ONNX Runtime DLL from `third_party\onnxruntime\lib\onnxruntime.dll` into the same folder. The application is now ready to run.
 
 ### System Installation (Linux Only)
 
