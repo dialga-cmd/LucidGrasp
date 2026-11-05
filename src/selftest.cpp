@@ -4,6 +4,7 @@
 #include "core/features.h"
 #include "core/index.h"
 
+#include <cmath>
 #include <cstdio>
 #include <vector>
 
@@ -722,6 +723,124 @@ int runSelfTest()
                 ++failures;
             } else {
                 std::printf("PASS: failed save left the existing cache intact\n\n");
+            }
+        }
+    }
+
+    std::printf("Case 12 — similarity-embedder preprocessing:\n");
+    {
+        QImage gray(640, 480, QImage::Format_RGB32);
+        gray.fill(QColor(128, 128, 128));
+        std::vector<float> tensor;
+        const int side = core::SemanticEmbedder::kInputSize;
+        const size_t per = size_t(side) * side;
+        if (!core::SemanticEmbedder::loadInput(gray, &tensor) ||
+            tensor.size() != size_t(3) * per) {
+            std::printf("FAIL: tensor sizing for a solid gray image\n\n");
+            ++failures;
+        } else {
+            const float mean[3] = {0.485f, 0.456f, 0.406f};
+            const float stdv[3] = {0.229f, 0.224f, 0.225f};
+            const float v = 128.0f / 255.0f;
+            const float expect[3] = {
+                (v - mean[0]) / stdv[0],
+                (v - mean[1]) / stdv[1],
+                (v - mean[2]) / stdv[2],
+            };
+            bool match = true;
+            for (int c = 0; c < 3 && match; ++c)
+                for (size_t i = 0; i < per; ++i) {
+                    const float got = tensor[c * per + i];
+                    if (std::fabs(got - expect[c]) > 1e-3f) {
+                        match = false;
+                        break;
+                    }
+                }
+            if (!match) {
+                std::printf("FAIL: similarity center-crop/normalization is "
+                            "wrong\n\n");
+                ++failures;
+            } else {
+                std::printf("PASS: center-crop to 224 plus ImageNet "
+                            "normalization matches the model input\n\n");
+            }
+        }
+    }
+
+    std::printf("Case 13 — similarity search without a model:\n");
+    {
+        core::SemanticEmbedder noModel;
+        std::vector<core::SearchResult> none;
+        if (index.searchSemantic(qExact, noModel, 0.0, none)) {
+            std::printf("FAIL: similarity search without a model reported "
+                        "success\n\n");
+            ++failures;
+        } else {
+            std::printf("PASS: similarity search without a model fails "
+                        "cleanly\n\n");
+        }
+    }
+
+    std::printf("Case 14 — similarity embedding end to end:\n");
+    {
+        const QString modelPath = core::defaultSemanticModelPath();
+        if (modelPath.isEmpty()) {
+            std::printf("SKIP: no similarity model installed (run "
+                        "./fetch-model.sh semantic)\n\n");
+        } else {
+            core::SemanticEmbedder embedder;
+            QString error;
+            if (!embedder.loadModel(modelPath, &error)) {
+                std::printf("FAIL: cannot load the similarity model: %s\n\n",
+                            qPrintable(error));
+                ++failures;
+            } else {
+                core::ImageIndex semIndex;
+                if (!semIndex.build(lib, {}, &embedder) ||
+                    !semIndex.hasSemanticEmbeddings()) {
+                    std::printf("FAIL: similarity index build produced no "
+                                "embeddings\n\n");
+                    ++failures;
+                } else {
+                    const QString cache =
+                        base + QStringLiteral("/semantic_index.bin");
+                    bool roundTrip = semIndex.save(cache);
+                    core::ImageIndex reloaded;
+                    roundTrip = roundTrip && reloaded.load(cache) &&
+                                reloaded.hasSemanticEmbeddings() &&
+                                reloaded.size() == semIndex.size();
+
+                    std::vector<core::SearchResult> sres;
+                    const bool searched =
+                        semIndex.searchSemantic(qExact, embedder, 0.0, sres);
+
+                    const int origRank =
+                        rankOf(sres, QStringLiteral("original.png"));
+                    const int copyRank =
+                        rankOf(sres, QStringLiteral("copy.png"));
+                    const bool strongTop =
+                        !sres.empty() && sres[0].score > 0.9 &&
+                        (origRank == 0 || copyRank == 0);
+                    const bool bothStrong =
+                        origRank >= 0 && copyRank >= 0 &&
+                        sres[origRank].score > 0.9 &&
+                        sres[copyRank].score > 0.9;
+
+                    if (!roundTrip) {
+                        std::printf("FAIL: similarity index round-trip lost "
+                                    "the embeddings\n\n");
+                        ++failures;
+                    } else if (!searched || !strongTop || !bothStrong) {
+                        std::printf("FAIL: byte-identical copies did not "
+                                    "dominate the similarity ranking\n\n");
+                        ++failures;
+                    } else {
+                        std::printf("PASS: similarity index round-trips and "
+                                    "byte-identical copies score "
+                                    "%.3f/%.3f\n\n",
+                                    sres[origRank].score, sres[copyRank].score);
+                    }
+                }
             }
         }
     }

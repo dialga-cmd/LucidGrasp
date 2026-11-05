@@ -47,6 +47,9 @@ jobs:
           test -n "$rev"
           printf '%s' "$rev" | grep -Eq '^(main|v[0-9])'
 
+      - name: Fetch ONNX Runtime
+        run: ./fetch-onnxruntime.sh
+
       - name: Build RPM locally
         run: |
           set -eu
@@ -54,7 +57,14 @@ jobs:
           top="$HOME/rpmbuild"
           rm -rf "$top"
           mkdir -p "$top"/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
-          git archive --format=tar --prefix="LucidGrasp-$sv/" HEAD | gzip -c > "$top/SOURCES/LucidGrasp-$sv.tar.gz"
+          # Bundle the prebuilt ONNX Runtime into the source tarball so the
+          # spec's cmake step can find it (third_party/ is git-ignored).
+          srcdir="$(mktemp -d)"
+          git archive --format=tar --prefix="LucidGrasp-$sv/" HEAD | tar -x -C "$srcdir"
+          mkdir -p "$srcdir/LucidGrasp-$sv/third_party"
+          cp -a third_party/onnxruntime "$srcdir/LucidGrasp-$sv/third_party/"
+          tar -C "$srcdir" -czf "$top/SOURCES/LucidGrasp-$sv.tar.gz" "LucidGrasp-$sv"
+          rm -rf "$srcdir"
           cp lucidgrasp.spec "$top/SPECS/"
           rpmbuild -bb \
             --nodeps \
@@ -107,8 +117,8 @@ jobs:
         run: |
           set -eu
           version="${{ steps.ver.outputs.version }}"
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "dialga-cmd"
+          git config user.email "adityaraj1234@duck.com"
           git add _service lucidgrasp.spec lucidgrasp.changes
           if ! git diff --cached --quiet; then
             git commit -m "chore: bump OBS packaging to v$version"

@@ -1,19 +1,22 @@
 #pragma once
 
+#include "core/cv_matcher.h"
 #include "core/features.h"
+#include "core/semantic_embedder.h"
 
 #include <functional>
 #include <vector>
 
 #include <QString>
 
-#include "core/cv_matcher.h"
-
 namespace core {
 
 struct IndexEntry {
   QString relPath;
   Features features;
+  // Semantic embedding of the image; empty when the index was built without
+  // the embedder (visual-only) or the image could not be embedded.
+  std::vector<float> embedding;
 };
 
 struct SearchResult {
@@ -35,7 +38,11 @@ public:
 
   using SearchProgressFn = std::function<bool(int, int)>;
 
-  bool build(const QString &rootDir, ProgressFn progress = {});
+  // Builds the index. When `embedder` is loaded, an embedding is computed for
+  // every image as well, so a later Similar search can rank the whole library
+  // without re-decoding anything.
+  bool build(const QString &rootDir, ProgressFn progress = {},
+             const SemanticEmbedder *embedder = nullptr);
   bool save(const QString &filePath) const;
   bool load(const QString &filePath);
 
@@ -48,6 +55,20 @@ public:
   bool searchFile(const QString &queryPath, double threshold,
                   std::vector<SearchResult> &out,
                   SearchProgressFn progress = {}) const;
+
+  // True when at least one entry carries an embedding, i.e. the index was
+  // built (or loaded) with the embedder. An index without embeddings must be
+  // rebuilt before a Similar search can be run against it.
+  bool hasSemanticEmbeddings() const;
+
+  // Similar (meaning-based) search. The query image is embedded with
+  // `embedder` and every indexed image is ranked by the cosine similarity of
+  // its stored embedding. Images indexed without an embedding are skipped.
+  // Returns false when the embedder is not loaded or the query is unreadable.
+  bool searchSemantic(const QString &queryPath,
+                      const SemanticEmbedder &embedder, double threshold,
+                      std::vector<SearchResult> &out,
+                      SearchProgressFn progress = {}) const;
 
   const QString &root() const { return root_; }
   int errorCount() const { return errors_; }

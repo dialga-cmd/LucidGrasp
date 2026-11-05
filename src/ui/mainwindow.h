@@ -34,6 +34,14 @@ public:
     explicit MainWindow(QWidget* parent = nullptr);
     ~MainWindow() override;
 
+    // Search mode selected from the "Search" menu. Visual is the plain
+    // feature match; Similar ranks by meaning with the DINOv2 embedding
+    // model.
+    enum class SearchMode {
+        Visual,
+        Similar,
+    };
+
 protected:
     void showEvent(QShowEvent* event) override;
     void dragEnterEvent(QDragEnterEvent* event) override;
@@ -52,6 +60,7 @@ private slots:
     void trashResult();
     void toggleTheme();
     void onUpdateCheckFinished(app::CheckOutcome outcome);
+    void searchModeTriggered(QAction* action);
 
 private:
     void tryLoadIndex(const QString& dir);
@@ -89,8 +98,14 @@ private:
     void openIssuePage(const QString& title, const QString& body);
     void equalizePanelHeights();
 
+    SearchMode selectedMode() const;
+    void applyModeButtons(SearchMode mode);
+
     QGroupBox* libGroup_ = nullptr;
     QGroupBox* queryGroup_ = nullptr;
+    QAction* visualAction_ = nullptr;
+    QAction* similarAction_ = nullptr;
+    SearchMode lastAppliedMode_ = SearchMode::Visual;
     QPalette desktopPalette_;
     bool panelsSized_ = false;
     QLineEdit* libEdit_ = nullptr;
@@ -122,4 +137,5 @@ private:
     QElapsedTimer searchTimer_;
     bool indexing_ = false;
     bool searching_ = false;
+    core::SemanticEmbedder semantic_;
 };

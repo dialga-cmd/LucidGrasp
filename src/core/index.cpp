@@ -23,7 +23,10 @@ namespace core {
 namespace {
 
 constexpr quint32 kMagic = 0x494D5349;
-constexpr quint32 kVersion = 2;
+// Version 3 added the optional per-entry semantic embedding; version 2 files
+// (no embedding) still load and are upgraded on the next save.
+constexpr quint32 kVersion = 3;
+constexpr quint32 kLegacyVersionNoEmbedding = 2;
 
 constexpr int kMaxScanDepth = 64;
 
@@ -193,7 +196,8 @@ bool isSupportedImage(const QString &path) {
   return supportedImageExtensionSet().contains(path.mid(dot + 1).toLower());
 }
 
-bool ImageIndex::build(const QString &rootDir, ProgressFn progress) {
+bool ImageIndex::build(const QString &rootDir, ProgressFn progress,
+                       const SemanticEmbedder *embedder) {
   clear();
 
   const QDir root(rootDir);
@@ -232,10 +236,16 @@ bool ImageIndex::build(const QString &rootDir, ProgressFn progress) {
     }
 
     Features feat;
-    if (extractFeatures(file, feat)) {
+    QImage image;
+    if (extractFeatures(file, feat, embedder ? &image : nullptr)) {
       IndexEntry e;
       e.relPath = QDir(root_).relativeFilePath(file);
       e.features = feat;
+      if (embedder && embedder->isLoaded() && !image.isNull()) {
+        std::vector<float> embedding;
+        if (embedder->embed(image, &embedding))
+          e.embedding = std::move(embedding);
+      }
       entries_.push_back(std::move(e));
     } else {
       ++errors_;
@@ -255,7 +265,18 @@ bool ImageIndex::save(const QString &filePath) const {
 
   QDataStream out(&f);
   out.setVersion(QDataStream::Qt_6_2);
-  out << kMagic << kVersion << root_ << qint32(errors_)
+
+  bool hasEmbedding = false;
+  for (const IndexEntry &e : entries_) {
+    if (!e.embedding.empty()) {
+      hasEmbedding = true;
+      break;
+    }
+  }
+  const quint32 version =
+      hasEmbedding ? kVersion : kLegacyVersionNoEmbedding;
+
+  out << kMagic << version << root_ << qint32(errors_)
       << quint32(entries_.size());
   for (const IndexEntry &e : entries_) {
     out << e.relPath << quint64(e.features.fileHash)
@@ -263,6 +284,13 @@ bool ImageIndex::save(const QString &filePath) const {
         << qint64(e.features.size) << qint64(e.features.mtimeMs);
     out.writeRawData(reinterpret_cast<const char *>(e.features.hist.data()),
                      kHistBins);
+    if (version >= kVersion) {
+      const quint32 dim = quint32(e.embedding.size());
+      out << dim;
+      if (dim > 0)
+        out.writeRawData(reinterpret_cast<const char *>(e.embedding.data()),
+                         qint64(dim) * qint64(sizeof(float)));
+    }
   }
 
   if (out.status() != QDataStream::Ok)
@@ -284,7 +312,8 @@ bool ImageIndex::load(const QString &filePath) {
   quint32 magic = 0, version = 0, count = 0;
   qint32 errors = 0;
   in >> magic >> version >> root_ >> errors >> count;
-  if (in.status() != QDataStream::Ok || magic != kMagic || version != kVersion) {
+  if (in.status() != QDataStream::Ok || magic != kMagic ||
+      (version != kVersion && version != kLegacyVersionNoEmbedding)) {
     clear();
     return false;
   }
@@ -310,6 +339,23 @@ bool ImageIndex::load(const QString &filePath) {
                        kHistBins) != kHistBins) {
       clear();
       return false;
+    }
+    if (version >= kVersion) {
+      quint32 dim = 0;
+      in >> dim;
+      if (in.status() != QDataStream::Ok || dim > 65536) {
+        clear();
+        return false;
+      }
+      if (dim > 0) {
+        e.embedding.resize(dim);
+        const qint64 bytes = qint64(dim) * qint64(sizeof(float));
+        if (in.readRawData(reinterpret_cast<char *>(e.embedding.data()),
+                           bytes) != bytes) {
+          clear();
+          return false;
+        }
+      }
     }
   }
   if (in.status() != QDataStream::Ok) {
@@ -447,6 +493,71 @@ bool ImageIndex::searchFile(const QString &queryPath, double threshold,
   if (!extractFeatures(queryPath, feat, &queryImg))
     return false;
   out = search(feat, queryImg, threshold, std::move(progress));
+  return true;
+}
+
+bool ImageIndex::hasSemanticEmbeddings() const {
+  for (const IndexEntry &e : entries_) {
+    if (!e.embedding.empty())
+      return true;
+  }
+  return false;
+}
+
+bool ImageIndex::searchSemantic(const QString &queryPath,
+                                const SemanticEmbedder &embedder,
+                                double threshold,
+                                std::vector<SearchResult> &out,
+                                SearchProgressFn progress) const {
+  out.clear();
+  if (entries_.empty())
+    return true;
+  if (!embedder.isLoaded())
+    return false;
+
+  const QImage queryImage = loadScaled(queryPath, 512);
+  if (queryImage.isNull())
+    return false;
+
+  std::vector<float> query;
+  if (!embedder.embed(queryImage, &query))
+    return false;
+
+  const QDir root(root_);
+  const size_t total = entries_.size();
+  for (size_t i = 0; i < total; ++i) {
+    if (progress && (i % 8192 == 0 || i + 1 == total)) {
+      const int cur =
+          i + 1 == total ? 100 : int(qint64(i) * 100 / total);
+      if (!progress(cur, 100))
+        return {};
+    }
+
+    const IndexEntry &e = entries_[i];
+    if (e.embedding.size() != query.size())
+      continue;
+
+    double dot = 0.0;
+    for (size_t k = 0; k < query.size(); ++k)
+      dot += double(query[k]) * double(e.embedding[k]);
+    if (dot < threshold)
+      continue;
+
+    SearchResult r;
+    r.relPath = e.relPath;
+    r.absPath = root.absoluteFilePath(e.relPath);
+    r.score = std::min(1.0, std::max(-1.0, dot));
+    out.push_back(std::move(r));
+  }
+  if (progress)
+    progress(100, 100);
+
+  std::sort(out.begin(), out.end(),
+            [](const SearchResult &a, const SearchResult &b) {
+              if (a.score != b.score)
+                return a.score > b.score;
+              return a.relPath < b.relPath;
+            });
   return true;
 }
 
