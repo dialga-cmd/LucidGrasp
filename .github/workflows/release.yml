@@ -11,7 +11,9 @@ permissions:
 
 jobs:
   build-linux:
-    runs-on: ubuntu-latest
+    # Build on the oldest supported LTS so the tarball and AppImage keep
+    # working on 24.04; ubuntu-latest now resolves to 26.04.
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
 
     steps:
