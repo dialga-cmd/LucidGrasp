@@ -3,6 +3,7 @@
 #include "app/update_checker.h"
 #include "app/key_entry_server.h"
 #include "app/secret_store.h"
+#include "app/surface_scan.h"
 #include "core/index.h"
 
 #include <atomic>
@@ -56,6 +57,12 @@ private slots:
     void toggleTheme();
     void onUpdateCheckFinished(app::CheckOutcome outcome);
     void openKeyEntry();
+    void startSurfaceScan();
+    void onSurfaceScanFinished(std::vector<app::SurfaceResult> results,
+                               const QString& error);
+    // Runs the search-button click: local index search, or surface scan,
+    // depending on the active mode.
+    void runSearchOrSurface();
 
 private:
     void tryLoadIndex(const QString& dir);
@@ -71,6 +78,10 @@ private:
     QListWidgetItem* currentResult() const;
     void showPreview(const QString& path);
     void setBusy(bool busy);
+    // Collapses the left panel to a query-image field + search button when
+    // entering surface mode, and restores the Library panel when leaving it.
+    void setSurfaceMode(bool on);
+    bool surfaceMode() const { return surfaceMode_; }
 
     bool systemPrefersDark() const;
     void setDark(bool dark);
@@ -111,6 +122,7 @@ private:
     QPushButton* revealBtn_ = nullptr;
     QPushButton* trashBtn_ = nullptr;
     QSpinBox* thresholdSpin_ = nullptr;
+    QLayout* thresholdRow_ = nullptr;
     QAction* indexAction_ = nullptr;
     QAction* queryAction_ = nullptr;
     app::UpdateChecker *updates_ = nullptr;
@@ -126,6 +138,9 @@ private:
     // be undone, and so the item's checkmark can be cleared when the dialog's
     // "never" button is pressed.
     QAction *autoUpdateAction_ = nullptr;
+    QAction *surfaceScanAction_ = nullptr;
+    // True when the left panel is collapsed to the query-image + search form.
+    bool surfaceMode_ = false;
     bool updateCheckManual_ = false;
 
     bool darkMode_ = false;
