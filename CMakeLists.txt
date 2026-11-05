@@ -27,6 +27,8 @@ set(SOURCES
     src/app/key_entry_server.h
     src/app/key_entry_server.cpp
     src/app/key_entry_page.h
+    src/app/surface_scan.h
+    src/app/surface_scan.cpp
     src/core/cv_matcher.h
     src/core/cv_matcher.cpp
     src/core/features.h
