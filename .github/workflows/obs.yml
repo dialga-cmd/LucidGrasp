@@ -26,7 +26,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake qt6-base-dev libopencv-dev g++ make rpm debugedit
+          sudo apt-get install -y cmake qt6-base-dev libopencv-dev g++ make rpm debugedit elfutils
 
       - name: Validate packaging consistency
         run: |
