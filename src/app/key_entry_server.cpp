@@ -132,16 +132,20 @@ bool buildProbe(const app::Provider& provider, const QString& key, Probe* out,
     }
 
     if (v == QLatin1String("saucenao")) {
+        // The 1×1 image is embedded in the request itself (no external CDN).
+        // SauceNAO checks the key before touching the search service, so a
+        // missing/invalid key is reported in the JSON header without consuming
+        // a search credit on the free tier.
         QUrlQuery q;
         q.addQueryItem(QStringLiteral("api_key"), key);
         q.addQueryItem(QStringLiteral("output_type"), QStringLiteral("2"));
-        q.addQueryItem(QStringLiteral("db"), QStringLiteral("999"));
+        q.addQueryItem(QStringLiteral("search_type"), QStringLiteral("url"));
         q.addQueryItem(QStringLiteral("url"),
-                       QStringLiteral("https://saucenao.com/images/static/logo.png"));
-        out->method = QByteArrayLiteral("POST");
+                       QStringLiteral(
+                           "https://saucenao.com/user"));
+        out->method = QByteArrayLiteral("GET");
         out->url = QUrl(QStringLiteral("https://saucenao.com/search.php"));
-        out->body = q.query(QUrl::FullyEncoded).toUtf8();
-        out->contentType = QByteArrayLiteral("application/x-www-form-urlencoded");
+        out->url.setQuery(q);
         return true;
     }
 
@@ -286,6 +290,11 @@ void judgeProbe(const app::Provider& provider, int status,
             *message = detail.isEmpty()
                            ? QStringLiteral("SauceNAO rejected the key.")
                            : detail;
+            return;
+        }
+        if (headerStatus == 100) {
+            *ok = true;
+            *message = QStringLiteral("Key accepted — rate limited by SauceNAO.");
             return;
         }
         *ok = true;
