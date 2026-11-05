@@ -15,7 +15,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
     - name: Install dependencies
       run: |
@@ -47,7 +47,7 @@ jobs:
 
     - name: Build AppImage
       run: |
-        wget -q -O appimagetool https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
+        wget -q -O appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
         chmod +x appimagetool
         mkdir -p AppDir/usr/bin
         mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
@@ -64,7 +64,7 @@ jobs:
 
     - name: Upload Release Assets
       if: github.event_name == 'release'
-      uses: softprops/action-gh-release@v2
+      uses: softprops/action-gh-release@v3
       with:
         files: |
           package/lucidgrasp-linux-x64.tar.gz
@@ -76,30 +76,33 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
     - name: Install Qt6
       uses: jurplel/install-qt-action@v4
       with:
-        version: '6.5.*'
+        version: '6.8.3'
         host: 'windows'
         target: 'desktop'
-        arch: 'win64_msvc2019_64'
+        arch: 'win64_msvc2022_64'
 
     - name: Install OpenCV
       shell: pwsh
       run: |
-        $opencvVersion = "4.10.0"
+        $opencvVersion = "4.14.0"
         $url = "https://github.com/opencv/opencv/releases/download/$opencvVersion/opencv-$opencvVersion-windows.exe"
         Invoke-WebRequest -Uri $url -OutFile opencv-installer.exe
         Start-Process -FilePath .\opencv-installer.exe -ArgumentList "-o`"C:\opencv`" -y" -Wait
+        $dll = Get-ChildItem -Path "C:\opencv\opencv\build\x64" -Recurse -Filter "opencv_world*.dll" |
+          Select-Object -First 1
+        if (-not $dll) { throw "opencv_world DLL not found under C:\opencv" }
         echo "OpenCV_DIR=C:\opencv\opencv\build" >> $env:GITHUB_ENV
-        echo "OpenCV_BIN=C:\opencv\opencv\build\x64\vc16\bin" >> $env:GITHUB_ENV
+        echo "OpenCV_BIN=$($dll.DirectoryName)" >> $env:GITHUB_ENV
 
     - name: Setup MSVC
       uses: ilammy/msvc-dev-cmd@v1
       with:
-        toolset: '14.29'
+        arch: x64
 
     - name: Build Project
       shell: pwsh
@@ -171,7 +174,7 @@ jobs:
 
     - name: Upload Release Asset
       if: github.event_name == 'release'
-      uses: softprops/action-gh-release@v2
+      uses: softprops/action-gh-release@v3
       with:
         files: |
           package/LucidGrasp_Setup_x64.exe
@@ -184,7 +187,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
     - name: Update Scoop Bucket
       env:
