@@ -20,6 +20,15 @@ set(SOURCES
     src/selftest.cpp
     src/app/update_checker.h
     src/app/update_checker.cpp
+    src/app/secret_store.h
+    src/app/secret_store.cpp
+    src/app/providers.h
+    src/app/providers.cpp
+    src/app/key_entry_server.h
+    src/app/key_entry_server.cpp
+    src/app/key_entry_page.h
+    src/app/surface_scan.h
+    src/app/surface_scan.cpp
     src/core/cv_matcher.h
     src/core/cv_matcher.cpp
     src/core/features.h
@@ -28,6 +37,8 @@ set(SOURCES
     src/core/index.cpp
     src/ui/mainwindow.h
     src/ui/mainwindow.cpp
+    src/ui/key_entry_dialog.h
+    src/ui/key_entry_dialog.cpp
     src/ui/file_actions.h
     src/ui/file_actions.cpp
 )

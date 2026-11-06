@@ -29,6 +29,14 @@ Every time the application is opened it checks GitHub for a newer release and sh
 
 The Help menu gets you in touch with the project: 'Report an Issue' and 'Request a Feature' open a pre-filled New Issue form on GitHub, 'Contact the Developer' opens your mail application, 'Privacy Policy...' explains exactly what the application does with your data, and 'About LucidGrasp' shows the installed version. The complete policy is also documented in [PRIVACY.md](PRIVACY.md).
 
+### Surface Scan
+
+Alongside local search, LucidGrasp includes a surface scan: given an image you select, it looks for where that image or a visually similar one appears across the open web. It is a bring-your-own-key feature. LucidGrasp ships no API key and never bundles a shared secret, so you connect an account you already control.
+
+Choose **Internet → Surface Scan — API Keys…** and the app opens a setup page in your default browser, served from a loopback address on your own machine. There you paste a key for each provider you want, press Validate to have the app check it against the provider directly, and press Sync to commit. Keys are stored in your OS keychain when one is available and otherwise in an owner-only settings file; the page only ever sees a masked value. The setup covers the platforms that are self-serve and grant recurring free credits, including Google Cloud Vision Web Detection, SauceNAO and trace.moe for reverse lookup, and SerpApi and Zenserp for third-party reverse search.
+
+To run it, choose **Internet → Surface Search…** (`Ctrl+Shift+S`): the left panel collapses to a query-image picker, and **Search the web** runs the image across every provider you have enabled. Results open the matching page in your browser. The reverse search calls are implemented and run off the GUI thread; the image-to-keyword bridge for the text-only vendors is the next step. Zenserp's reverse endpoint needs a publicly hosted image URL, so it reports that local files are unsupported instead of failing silently.
+
 ### How It Works
 
 Each search runs three independent comparison algorithms and combines their results into a single similarity percentage.
@@ -45,7 +53,7 @@ Running those three algorithms against every indexed image would make each searc
 
 ### Planned Expansion
 
-The long term goal for this project is global discovery. The local search functionality serves as the foundation for a much larger distributed network crawler. Upcoming updates will introduce the ability to scan websites and deep web repositories for specific images. This will turn the application into a powerful asset for cybersecurity professionals and researchers who need to track the spread of sensitive media across the internet.
+The long term goal for this project is global discovery. Local search is the foundation; the surface scan above adds the ability to look up a selected image across the open web through provider APIs. Beyond that, a distributed crawler is planned to expand and verify results, aimed at cybersecurity professionals and researchers who need to track the spread of sensitive media. Discovery always comes from a provider API or the reverse lookup above; the crawler is a verifier, not a discovery source.
 
 ### Downloads
 
@@ -94,7 +102,7 @@ make
 ./LucidGrasp
 ```
 
-If you would rather confirm the build is sound before opening a window, `--selftest` builds a synthetic image corpus, indexes it, and verifies that edited and rescaled copies rank above unrelated distractors, along with the update checker's version and payload handling. It needs no network and no display.
+If you would rather confirm the build is sound before opening a window, `--selftest` builds a synthetic image corpus, indexes it, and verifies that edited and rescaled copies rank above unrelated distractors, along with the update checker's version and payload handling and the surface-scan key store and loopback request handling. It needs no network and no display.
 
 ```bash
 ./LucidGrasp --selftest

@@ -1,6 +1,9 @@
 #include "ui/mainwindow.h"
 
+#include "ui/key_entry_dialog.h"
 #include "ui/file_actions.h"
+#include "app/providers.h"
+#include "app/surface_scan.h"
 
 #include <QAbstractButton>
 #include <QAction>
@@ -17,6 +20,8 @@
 #include <QGroupBox>
 #include <QGuiApplication>
 #include <QHBoxLayout>
+#include <QIcon>
+#include <QImage>
 #include <QImageReader>
 #include <QKeySequence>
 #include <QLabel>
@@ -612,6 +617,9 @@ MainWindow::MainWindow(QWidget *parent)
 
   queryLayout->addWidget(searchBtn_);
   queryLayout->addLayout(threshRow);
+  // Keep the threshold row so surface mode can hide the whole thing (the label
+  // and the spin sit side by side in it).
+  thresholdRow_ = threshRow;
   left->addWidget(queryGroup_);
 
   stats_ = new QLabel(central);
@@ -645,7 +653,7 @@ MainWindow::MainWindow(QWidget *parent)
   connect(browseQueryBtn_, &QPushButton::clicked, this,
           &MainWindow::browseQuery);
   connect(indexBtn_, &QPushButton::clicked, this, &MainWindow::startIndex);
-  connect(searchBtn_, &QPushButton::clicked, this, &MainWindow::startSearch);
+  connect(searchBtn_, &QPushButton::clicked, this, &MainWindow::runSearchOrSurface);
   connect(results_, &QListWidget::itemDoubleClicked, this,
           &MainWindow::openResult);
   connect(revealBtn_, &QPushButton::clicked, this, &MainWindow::revealResult);
@@ -663,6 +671,12 @@ MainWindow::MainWindow(QWidget *parent)
                  const QString &notes) { showUpdateDialog(tag, url, notes); });
   connect(updates_, &app::UpdateChecker::finished, this,
           &MainWindow::onUpdateCheckFinished);
+
+  // Parented to the window, so the loopback listener lives exactly as long as
+  // the app and is torn down with it.
+  keyServer_ = new app::KeyEntryServer(&secrets_, this);
+  connect(keyServer_, &app::KeyEntryServer::keysChanged, this,
+          &MainWindow::updateActions);
 
   buildMenus();
 
@@ -699,6 +713,28 @@ void MainWindow::buildMenus() {
   quitAction->setShortcut(QKeySequence::Quit);
   connect(quitAction, &QAction::triggered, this, &QWidget::close);
 
+  // Internet is the surface-scan entry point. The keys themselves live in the
+  // browser page the action opens; this menu is just the door.
+  QMenu *internet = bar->addMenu(tr("&Internet"));
+  QAction *keysAction =
+      internet->addAction(tr("Surface Scan — API &Keys..."));
+  connect(keysAction, &QAction::triggered, this, &MainWindow::openKeyEntry);
+
+  surfaceScanAction_ =
+      internet->addAction(tr("&Surface Search…"));
+  surfaceScanAction_->setCheckable(true);
+  surfaceScanAction_->setChecked(false);
+  surfaceScanAction_->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+S")));
+  surfaceScanAction_->setToolTip(
+      QStringLiteral("Collapse to web search: pick a query image, and the "
+                     "Search button runs it across your enabled providers."));
+  connect(surfaceScanAction_, &QAction::toggled, this,
+          [this](bool on) { setSurfaceMode(on); });
+
+  // Updates is where the update check lives, and that is the reason this menu
+  // exists. The dialog offers a permanent opt-out, so there has to be a way to
+  // take it back: without a permanent entry point, "never check for updates"
+  // could only be undone by reinstalling the app.
   QMenu *updatesMenu = bar->addMenu(tr("&Updates"));
 
   QAction *checkAction = updatesMenu->addAction(tr("&Check for Updates..."));
@@ -966,6 +1002,204 @@ void MainWindow::showLegalNoticesDialog() {
   dialog->show();
 }
 
+void MainWindow::setSurfaceMode(bool on) {
+  if (surfaceMode_ == on)
+    return;
+  if (indexing_ || searching_) {
+    // Don't reshuffle the panel mid-search. Put the menu check back in sync
+    // with the mode that is actually active.
+    if (surfaceScanAction_ && surfaceScanAction_->isChecked() != surfaceMode_)
+      surfaceScanAction_->setChecked(surfaceMode_);
+    return;
+  }
+
+  surfaceMode_ = on;
+
+  // Surface mode collapses the left panel to "pick a query image, then
+  // Search". The Library group and the local-search threshold disappear.
+  libGroup_->setVisible(!on);
+  // A QLayout isn't a widget, so hide the label and spin that live in the
+  // threshold row instead of the row itself.
+  if (thresholdRow_)
+    for (int i = 0; i < thresholdRow_->count(); ++i) {
+      if (auto *w = thresholdRow_->itemAt(i)->widget())
+        w->setVisible(!on);
+    }
+
+  if (on) {
+    queryGroup_->setTitle(QStringLiteral("Surface search"));
+    searchBtn_->setText(QStringLiteral("Search the web"));
+    searchBtn_->setToolTip(
+        QStringLiteral("Run the selected image across your enabled providers."));
+  } else {
+    queryGroup_->setTitle(QStringLiteral("Query image"));
+    searchBtn_->setText(QStringLiteral("Search"));
+    searchBtn_->setToolTip(QString());
+  }
+
+  results_->clear();
+  stats_->setText(on ? QStringLiteral("Pick a query image, then Search the web.")
+                    : QStringLiteral("No library indexed."));
+  updateActions();
+}
+
+void MainWindow::runSearchOrSurface() {
+  if (surfaceMode_)
+    startSurfaceScan();
+  else
+    startSearch();
+}
+
+void MainWindow::startSurfaceScan() {
+  // Clicking the button again while a surface scan is running stops it.
+  if (searching_) {
+    cancel_ = true;
+    searchBtn_->setText(QStringLiteral("Stopping…"));
+    searchBtn_->setEnabled(false);
+    statusBar()->showMessage(QStringLiteral("Stopping…"), 4000);
+    return;
+  }
+
+  const QString query = queryEdit_->text();
+  if (query.isEmpty()) {
+    statusBar()->showMessage(
+        QStringLiteral("Choose a query image first."), 4000);
+    return;
+  }
+
+  statusBar()->showMessage(QStringLiteral("Running surface scan…"));
+  searching_ = true;
+  cancel_ = false;
+  searchBtn_->setText(QStringLiteral("Stop"));
+  setBusy(true);
+  results_->clear();
+
+  // Run the network calls off the GUI thread so the window never freezes; the
+  // progress and the finished callback are marshalled back with queued invokes.
+  searchWorker_ = std::thread([this, query] {
+    std::vector<app::SurfaceResult> results;
+    QString error;
+    try {
+      app::SurfaceScan scan(&secrets_);
+      results = scan.search(
+          query,
+          [this](int done, int total, const QString& current) {
+            QMetaObject::invokeMethod(
+                this,
+                [this, done, total, current] {
+                  stats_->setText(
+                      QStringLiteral("Searching the web… %1 of %2 — %3")
+                          .arg(done)
+                          .arg(total)
+                          .arg(current));
+                },
+                Qt::QueuedConnection);
+          },
+          [this]() -> bool { return cancel_.load(); });
+    } catch (const std::exception& e) {
+      error = QString::fromUtf8(e.what());
+    } catch (...) {
+      error = QStringLiteral("unknown error");
+    }
+
+    QMetaObject::invokeMethod(
+        this,
+        [this, results = std::move(results), error = std::move(error)]() mutable {
+          onSurfaceScanFinished(std::move(results), error);
+        },
+        Qt::QueuedConnection);
+  });
+}
+
+void MainWindow::onSurfaceScanFinished(
+    std::vector<app::SurfaceResult> results, const QString& error) {
+  if (searchWorker_.joinable())
+    searchWorker_.join();
+
+  const bool wasCancelled = cancel_.load();
+  searching_ = false;
+  cancel_ = false;
+  searchBtn_->setText(surfaceMode_ ? QStringLiteral("Search the web")
+                                   : QStringLiteral("Search"));
+  setBusy(false);
+
+  if (!error.isEmpty()) {
+    stats_->setText(QStringLiteral("Surface scan failed: %1").arg(error));
+    statusBar()->showMessage(QStringLiteral("Surface scan failed"), 4000);
+    return;
+  }
+  if (wasCancelled) {
+    stats_->setText(QStringLiteral("Surface scan cancelled."));
+    statusBar()->showMessage(QStringLiteral("Surface scan cancelled"), 4000);
+    return;
+  }
+
+  // Split real hits from per-provider errors so the grid shows both.
+  int hits = 0;
+  for (const auto& r : results)
+    if (r.error.isEmpty())
+      ++hits;
+
+  // Thumbnails were downloaded and pre-scaled on the worker thread; all that is
+  // left here is decoding the small PNGs, which is cheap.
+  results_->clear();
+  for (const auto& r : results) {
+    QString label;
+    if (!r.error.isEmpty()) {
+      label = r.providerName + QStringLiteral(" — ") + r.error;
+    } else {
+      label = r.providerName + QStringLiteral(": ");
+      if (!r.title.isEmpty())
+        label += r.title;
+      if (r.similarity >= 0.0)
+        label += QStringLiteral(" (%1%)").arg(int(r.similarity * 100.0));
+      if (!r.extra.isEmpty())
+        label += QStringLiteral("\n") + r.extra;
+    }
+
+    // The thumbnail is the most useful visual here; fall back to the provider
+    // name when a hit has no image.
+    QPixmap thumb;
+    if (r.error.isEmpty() && !r.thumbnailData.isEmpty()) {
+      QImage image;
+      if (image.loadFromData(r.thumbnailData, "PNG"))
+        thumb = QPixmap::fromImage(image);
+    }
+    QIcon icon;
+    if (!thumb.isNull())
+      icon = QIcon(thumb);
+
+    auto* item = new QListWidgetItem(icon, label);
+    item->setData(Qt::UserRole, r.url);
+    item->setData(Qt::UserRole + 1, r.provider);
+    item->setData(Qt::UserRole + 2, QVariant(1));  // sentinel: web result
+    if (!r.url.isEmpty())
+      item->setToolTip(r.url + (r.thumbnail.isEmpty() ? QString()
+                                                     : QStringLiteral("\n") + r.thumbnail));
+    item->setSizeHint({170, 200});
+    results_->addItem(item);
+  }
+
+  stats_->setText(hits == 0
+                     ? QStringLiteral("No web matches found.")
+                     : QStringLiteral("Surface scan complete — %1 result(s).")
+                           .arg(hits));
+
+  if (hits == 0)
+    statusBar()->showMessage(QStringLiteral("No web matches found."), 5000);
+  else
+    statusBar()->showMessage(
+        QStringLiteral("Surface scan: %1 result(s).").arg(hits), 5000);
+}
+
+void MainWindow::openKeyEntry() {
+  // One dialog for the whole session: a second tap raises it rather than
+  // starting a second server or opening another browser tab.
+  if (!keyEntryDialog_)
+    keyEntryDialog_ = new KeyEntryDialog(keyServer_, this);
+  keyEntryDialog_->prompt();
+}
+
 void MainWindow::showUpdateDialog(const QString &tag, const QString &url,
                                   const QString &notes) {
   auto *dialog = new QDialog(this);
@@ -1060,6 +1294,9 @@ QString MainWindow::askForFile(const QString &title,
   dlg.setFileMode(QFileDialog::ExistingFile);
   dlg.setNameFilter(filter);
   applyThemeTo(&dlg);
+  // A fresh file dialog expands to the parent's full width, which reads as
+  // "really big". Cap it to a comfortable size; it stays resizable.
+  dlg.resize(720, 440);
   return dlg.exec() == QDialog::Accepted ? dlg.selectedFiles().value(0)
                                          : QString();
 }
@@ -1492,21 +1729,33 @@ void MainWindow::trashResult() {
 }
 
 void MainWindow::updateResultActions() {
-  const bool haveResult = currentResult() != nullptr;
-  revealBtn_->setEnabled(haveResult);
-  trashBtn_->setEnabled(haveResult);
+  QListWidgetItem *item = currentResult();
+  const bool haveResult = item != nullptr;
+  // Reveal-in-file-manager and trash only make sense for local index results,
+  // not for web hits returned by a surface scan.
+  const bool isWeb = haveResult && item->data(Qt::UserRole + 2).toInt() == 1;
+  revealBtn_->setEnabled(haveResult && !isWeb);
+  trashBtn_->setEnabled(haveResult && !isWeb);
 }
 
 void MainWindow::setBusy(bool busy) {
   browseLibBtn_->setEnabled(!busy);
   browseQueryBtn_->setEnabled(!busy);
   thresholdSpin_->setEnabled(!busy);
+  if (surfaceScanAction_)
+    surfaceScanAction_->setEnabled(!busy);
   updateActions();
 }
 
 void MainWindow::openResult(QListWidgetItem *item) {
   const QString path = item->data(Qt::UserRole).toString();
-  if (!path.isEmpty())
+  if (path.isEmpty())
+    return;
+  // Surface-scan results carry a web URL and a sentinel in UserRole+2; local
+  // index results carry a filesystem path.
+  if (item->data(Qt::UserRole + 2).toInt() == 1)
+    QDesktopServices::openUrl(QUrl(path));
+  else
     QDesktopServices::openUrl(QUrl::fromLocalFile(path));
 }
 
@@ -1515,16 +1764,42 @@ void MainWindow::updateActions() {
   const bool canAct = !busy && currentResult() != nullptr;
   revealBtn_->setEnabled(canAct);
   trashBtn_->setEnabled(canAct);
-  const bool canIndex = !busy && !libEdit_->text().isEmpty();
+  const bool canIndex = !busy && !libEdit_->text().isEmpty() && !surfaceMode_;
   indexBtn_->setEnabled(indexing_ || canIndex);
-  browseLibBtn_->setEnabled(!busy);
+  browseLibBtn_->setEnabled(!busy && !surfaceMode_);
   browseQueryBtn_->setEnabled(!busy);
-  searchBtn_->setEnabled(
-      busy ? searching_ : (!index_.empty() && !queryEdit_->text().isEmpty()));
+
+  if (surfaceMode_) {
+    // Surface mode: the button runs a web scan, so it only needs a chosen
+    // query image and at least one enabled provider (trace_moe needs no key).
+    static const QStringList kReverse = {
+        QStringLiteral("google_vision"), QStringLiteral("saucenao"),
+        QStringLiteral("trace_moe"),     QStringLiteral("serpapi"),
+        QStringLiteral("zenserp")};
+    bool anyProvider = false;
+    for (const auto& p : app::providers()) {
+      if (!kReverse.contains(p.id))
+        continue;
+      if (!p.needsKey || secrets_.load(p.id).found()) {
+        anyProvider = true;
+        break;
+      }
+    }
+    searchBtn_->setEnabled(
+        busy ? searching_ : (anyProvider && !queryEdit_->text().isEmpty()));
+  } else {
+    searchBtn_->setEnabled(
+        busy ? searching_ : (!index_.empty() && !queryEdit_->text().isEmpty()));
+  }
+
   if (indexAction_)
-    indexAction_->setEnabled(!busy);
+    indexAction_->setEnabled(!busy && !surfaceMode_);
   if (queryAction_)
     queryAction_->setEnabled(!busy);
+  // The mode toggle is always reachable once the window is up; it just can't
+  // switch while a search is in flight.
+  if (surfaceScanAction_)
+    surfaceScanAction_->setEnabled(!busy);
 }
 
 bool MainWindow::systemPrefersDark() const {

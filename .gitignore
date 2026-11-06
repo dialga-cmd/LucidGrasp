@@ -29,12 +29,22 @@ Makefile
 node_modules/
 .npm/
 
+# Local secrets for the surface-scan providers (never commit API keys)
+.env
+*.env
+providers.ini
+secrets.ini
+*.key
+
+# Third-party libraries (downloaded/extracted)
 third_party/
 models/
 *.onnx
 *.pt
 *.bin
 *.fix*
+
+# Brag video output
 brag-output/
 
 Thumbs.db
