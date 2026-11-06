@@ -1,9 +1,10 @@
 # Image — Surface Scan Plan
 
-Last updated: 2026-10-03
-Status: research + design complete; **key-entry platform implemented** on
-`feature/surface-search` (storage, validation, local server, page). Provider
-search calls and the image→keyword bridge are not written yet. See §10.
+Last updated: 2026-11-06
+Status: research + design complete; **key-entry platform and multi-provider
+reverse-image search implemented** on `feature/surface-search` (storage,
+validation, local server, page, provider calls). The image→keyword bridge is
+not written yet. See §10.
 
 Supersedes the earlier `lists.md` (image-hosting + keyword-search list). This file is
 scoped to the **surface scan** feature only: given an image the user has selected, find
@@ -298,10 +299,10 @@ balance, not a monthly/daily/hourly reset), or because they are sales/KYC-gated:
 
 ---
 
-## 10. Implementation status (2026-10-03)
+## 10. Implementation status (2026-11-06)
 
-The **key-entry platform** is implemented on `feature/surface-search`; the search
-itself is not.
+The **key-entry platform** and the **reverse-image search** are implemented on
+`feature/surface-search`.
 
 Built:
 
@@ -320,6 +321,28 @@ Built:
   opens the browser exactly once, and reuses itself on a second tap.
 - Self-test Case 10 covers the store, the mask, the registry, the request parser, the
   token compare and the host check.
+- `SurfaceScan` (`surface_scan.{h,cpp}`) — runs the reverse-native providers that
+  have a key and parses their hits into one `SurfaceResult` list:
+  - **Google Cloud Vision** — `images:annotate` + `WEB_DETECTION`; pages, matching /
+    visually-similar images, web entities and best-guess labels.
+  - **SauceNAO** — multipart upload; header `similarity`, `data.title` /
+    `author_name`, `data.ext_urls`, header thumbnail. Handles status `< 0` and
+    `100` (rate limit).
+  - **trace.moe** — raw image body POST (not base64/form); `anilist`, `filename`,
+    `image`, `similarity` (0–1), episode/timestamps. A `400 "Failed to process
+    image"` is treated as no match, and frames below 0.90 similarity are dropped
+    because the API returns low-confidence noise for non-anime images.
+  - **SerpApi** — uploads the image to `/image` (JPEG, ≤ 480 KB) then calls
+    `engine=google_lens&image_id=…`; reads `exact_matches` / `visual_matches`.
+  - **Zenserp** — reported as unsupported for local files with a clear message,
+    because its reverse endpoint requires a publicly hosted `image_url`.
+- Uploads are downscaled (max 1024 px) before encoding; results are capped at 24
+  per provider; every request has a hard 30 s wall-clock deadline; missing or slow
+  thumbnails are skipped (15 s each, 20 s per provider budget) instead of failing
+  the scan.
+- `MainWindow` — `Internet → Surface Search…` toggles a mode that collapses the left
+  panel to the query picker + **Search the web**; the scan runs on a worker thread,
+  is cancellable, and shows web hits with thumbnails that open in the browser.
 
 Validation probes (one-shot, server-side in C++):
 
@@ -339,9 +362,9 @@ Validation probes (one-shot, server-side in C++):
 
 Not built:
 
-- Provider `search(image)` calls that turn a selected image into results.
 - The image→keyword bridge (§5) that feeds the keyword-only vendors.
 - Result caching and `429` / `Retry-After` backoff (planned, §7).
+- Zenserp and the other keyword platforms as second-stage providers.
 
 ZenRows and Scrape.do are the least certain probes and would be the first to need
 adjusting if a vendor changes its API.

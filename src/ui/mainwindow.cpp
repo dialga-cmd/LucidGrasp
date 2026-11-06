@@ -21,6 +21,7 @@
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QIcon>
+#include <QImage>
 #include <QImageReader>
 #include <QKeySequence>
 #include <QLabel>
@@ -1004,8 +1005,13 @@ void MainWindow::showLegalNoticesDialog() {
 void MainWindow::setSurfaceMode(bool on) {
   if (surfaceMode_ == on)
     return;
-  if (on && (indexing_ || searching_))
-    return;  // don't reshuffle the panel mid-search
+  if (indexing_ || searching_) {
+    // Don't reshuffle the panel mid-search. Put the menu check back in sync
+    // with the mode that is actually active.
+    if (surfaceScanAction_ && surfaceScanAction_->isChecked() != surfaceMode_)
+      surfaceScanAction_->setChecked(surfaceMode_);
+    return;
+  }
 
   surfaceMode_ = on;
 
@@ -1134,9 +1140,8 @@ void MainWindow::onSurfaceScanFinished(
     if (r.error.isEmpty())
       ++hits;
 
-  // Pull each result's thumbnail down and show it in the grid. This runs on
-  // the GUI thread, but each fetch is bounded by a 15s deadline so a slow
-  // remote image can't hang the window.
+  // Thumbnails were downloaded and pre-scaled on the worker thread; all that is
+  // left here is decoding the small PNGs, which is cheap.
   results_->clear();
   for (const auto& r : results) {
     QString label;
@@ -1153,10 +1158,13 @@ void MainWindow::onSurfaceScanFinished(
     }
 
     // The thumbnail is the most useful visual here; fall back to the provider
-    // name when a hit has no image URL.
+    // name when a hit has no image.
     QPixmap thumb;
-    if (r.error.isEmpty())
-      thumb = app::SurfaceScan::thumbnailPixmap(r.thumbnail, 128);
+    if (r.error.isEmpty() && !r.thumbnailData.isEmpty()) {
+      QImage image;
+      if (image.loadFromData(r.thumbnailData, "PNG"))
+        thumb = QPixmap::fromImage(image);
+    }
     QIcon icon;
     if (!thumb.isNull())
       icon = QIcon(thumb);
@@ -1734,6 +1742,8 @@ void MainWindow::setBusy(bool busy) {
   browseLibBtn_->setEnabled(!busy);
   browseQueryBtn_->setEnabled(!busy);
   thresholdSpin_->setEnabled(!busy);
+  if (surfaceScanAction_)
+    surfaceScanAction_->setEnabled(!busy);
   updateActions();
 }
 
