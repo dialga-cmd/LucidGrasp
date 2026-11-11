@@ -546,10 +546,6 @@ MainWindow::MainWindow(QWidget *parent)
       makeToolButton(QStringLiteral("themeToggleBtn"), QString());
   topBar->addWidget(themeToggleBtn_);
 
-  openBrowserBtn_ = makeToolButton(QStringLiteral("openBrowserBtn"),
-                                   QStringLiteral("Open in browser"));
-  topBar->addWidget(openBrowserBtn_);
-
   revealBtn_ = makeToolButton(QStringLiteral("revealBtn"),
                               QStringLiteral("Show in file manager"));
   topBar->addWidget(revealBtn_);
@@ -661,25 +657,22 @@ MainWindow::MainWindow(QWidget *parent)
   connect(searchBtn_, &QPushButton::clicked, this, &MainWindow::runSearchOrSurface);
   connect(results_, &QListWidget::itemDoubleClicked, this,
           &MainWindow::openResult);
-  connect(openBrowserBtn_, &QPushButton::clicked, this,
-          &MainWindow::openInBrowser);
-  // Single click on the image thumbnail opens a fullscreen view; clicking the
-  // text label just selects.
+  // Single click on the card's image opens a fullscreen view; clicking the
+  // source text or the "Open in browser" button just selects / opens the URL.
   connect(results_, &QListWidget::itemClicked,
           [this](QListWidgetItem *item) {
             if (item->data(Qt::UserRole + 2).toInt() != 1)
               return;
-            const QPoint clickPos = QCursor::pos();
-            const QPoint viewPos =
-                results_->viewport()->mapFromGlobal(clickPos);
-            const QRect itemRect = results_->visualItemRect(item);
-            if (!itemRect.contains(viewPos))
+            QWidget *card = results_->itemWidget(item);
+            if (!card)
               return;
-            const QSize iconSize = results_->iconSize();
-            const QPoint iconTopLeft(
-                itemRect.center().x() - iconSize.width() / 2,
-                itemRect.top() + 4);
-            if (QRect(iconTopLeft, iconSize).contains(viewPos))
+            auto *imgLabel = card->findChild<QLabel *>(
+                QStringLiteral("cardImage"));
+            if (!imgLabel)
+              return;
+            const QPoint topLeft = imgLabel->mapToGlobal(QPoint(0, 0));
+            const QRect imgRect(topLeft, imgLabel->size());
+            if (imgRect.contains(QCursor::pos()))
               viewFullscreen();
           });
   connect(revealBtn_, &QPushButton::clicked, this, &MainWindow::revealResult);
@@ -1150,73 +1143,69 @@ void MainWindow::startSurfaceScan() {
 void MainWindow::appendSurfaceBatch(
     const std::vector<app::SurfaceResult>& batch) {
   for (const auto& r : batch) {
-    QString label;
-    QString tooltip;
+    // Build a card widget: image on top, source label middle, button bottom.
+    auto *card = new QWidget;
+    card->setObjectName(QStringLiteral("surfaceCard"));
+    auto *lay = new QVBoxLayout(card);
+    lay->setContentsMargins(8, 8, 8, 8);
+    lay->setSpacing(4);
+
     if (!r.error.isEmpty()) {
-      label = r.providerName + QStringLiteral(" — ") + r.error;
+      // Error card: show the error text, no image or button.
+      auto *errLabel = new QLabel(r.error, card);
+      errLabel->setObjectName(QStringLiteral("cardError"));
+      errLabel->setWordWrap(true);
+      errLabel->setAlignment(Qt::AlignTop | Qt::AlignHCenter);
+      lay->addWidget(errLabel);
     } else {
-      // Show only the provider name as the visible label; the full title
-      // lives in the tooltip so the grid stays clean.
-      label = r.providerName;
-      if (!r.extra.isEmpty())
-        label += QStringLiteral("  ") + r.extra;
-      tooltip = r.title.isEmpty() ? r.providerName : r.title;
-      if (!r.url.isEmpty())
-        tooltip += QStringLiteral("\n") + r.url;
+      // Image — decode the thumbnail for the card, and the full image for
+      // the fullscreen view.
+      auto *imgLabel = new QLabel(card);
+      imgLabel->setObjectName(QStringLiteral("cardImage"));
+      imgLabel->setAlignment(Qt::AlignCenter);
+      imgLabel->setFixedSize(140, 140);
+      if (!r.thumbnailData.isEmpty()) {
+        QImage img;
+        if (img.loadFromData(r.thumbnailData, "PNG"))
+          imgLabel->setPixmap(QPixmap::fromImage(img).scaled(
+              QSize(140, 140), Qt::KeepAspectRatio,
+              Qt::SmoothTransformation));
+      } else if (!r.fullImage.isEmpty()) {
+        QImage img;
+        if (img.loadFromData(r.fullImage))
+          imgLabel->setPixmap(QPixmap::fromImage(img).scaled(
+              QSize(140, 140), Qt::KeepAspectRatio,
+              Qt::SmoothTransformation));
+      }
+      imgLabel->setCursor(Qt::PointingHandCursor);
+      lay->addWidget(imgLabel, 0, Qt::AlignHCenter);
+
+      // Source label
+      auto *srcLabel = new QLabel(r.providerName, card);
+      srcLabel->setObjectName(QStringLiteral("cardSource"));
+      srcLabel->setAlignment(Qt::AlignCenter);
+      srcLabel->setToolTip(r.url);
+      lay->addWidget(srcLabel);
+
+      // "Open in browser" button
+      auto *openBtn =
+          new QPushButton(QStringLiteral("Open in browser"), card);
+      openBtn->setObjectName(QStringLiteral("cardOpenBtn"));
+      openBtn->setCursor(Qt::PointingHandCursor);
+      connect(openBtn, &QPushButton::clicked,
+              [url = r.url]() { QDesktopServices::openUrl(QUrl(url)); });
+      lay->addWidget(openBtn);
     }
 
-    QPixmap thumb;
-    if (r.error.isEmpty() && !r.thumbnailData.isEmpty()) {
-      QImage image;
-      if (image.loadFromData(r.thumbnailData, "PNG"))
-        thumb = QPixmap::fromImage(image);
-    }
-    QIcon icon;
-    if (!thumb.isNull())
-      icon = QIcon(thumb);
-
-    auto* item = new QListWidgetItem(label);
+    auto *item = new QListWidgetItem;
     item->setData(Qt::UserRole, r.url);
     item->setData(Qt::UserRole + 1, r.provider);
     item->setData(Qt::UserRole + 2, QVariant(1));  // sentinel: web result
     if (!r.fullImage.isEmpty())
       item->setData(Qt::UserRole + 3, r.fullImage);
-    if (!tooltip.isEmpty())
-      item->setToolTip(tooltip);
 
-    // Compose a container widget: the thumbnail image on top, an "Open in
-    // browser" button underneath, so the button lives per-item rather than in
-    // a shared toolbar.
-    auto* container = new QWidget;
-    auto* vLayout = new QVBoxLayout(container);
-    vLayout->setContentsMargins(0, 0, 0, 0);
-    vLayout->setSpacing(4);
-
-    if (!thumb.isNull()) {
-      auto* imgLabel = new QLabel(container);
-      imgLabel->setPixmap(thumb.scaled(
-          128, 128, Qt::KeepAspectRatio, Qt::SmoothTransformation));
-      imgLabel->setAlignment(Qt::AlignCenter);
-      vLayout->addWidget(imgLabel, 0, Qt::AlignTop);
-    }
-
-    if (!r.error.isEmpty()) {
-      vLayout->addWidget(new QLabel(r.error.left(40), container));
-    } else {
-      auto* openBtn = new QPushButton(QStringLiteral("Open in browser"), container);
-      openBtn->setObjectName(QStringLiteral("openBtn"));
-      openBtn->setCursor(Qt::PointingHandCursor);
-      connect(openBtn, &QPushButton::clicked, this, [this, item] {
-        const QString url = item->data(Qt::UserRole).toString();
-        if (!url.isEmpty())
-          QDesktopServices::openUrl(QUrl(url));
-      });
-      vLayout->addWidget(openBtn);
-    }
-
-    item->setSizeHint({170, 200});
     results_->addItem(item);
-    results_->setItemWidget(item, container);
+    results_->setItemWidget(item, card);
   }
 
   // Keep the status line live while results stream in.
@@ -1804,23 +1793,8 @@ void MainWindow::updateResultActions() {
   // Reveal-in-file-manager and trash only make sense for local index results,
   // not for web hits returned by a surface scan.
   const bool isWeb = haveResult && item->data(Qt::UserRole + 2).toInt() == 1;
-  const bool hasUrl = isWeb &&
-                      !item->data(Qt::UserRole).toString().isEmpty();
-  openBrowserBtn_->setEnabled(hasUrl);
   revealBtn_->setEnabled(haveResult && !isWeb);
   trashBtn_->setEnabled(haveResult && !isWeb);
-}
-
-void MainWindow::openInBrowser() {
-  QListWidgetItem *item = currentResult();
-  if (!item || item->data(Qt::UserRole + 2).toInt() != 1)
-    return;
-  const QString url = item->data(Qt::UserRole).toString();
-  if (url.isEmpty())
-    return;
-  if (!QDesktopServices::openUrl(QUrl(url)))
-    statusBar()->showMessage(QStringLiteral("Could not open the browser"),
-                              4000);
 }
 
 void MainWindow::viewFullscreen() {
@@ -2096,6 +2070,21 @@ QPushButton:disabled { color: @muted; border-color: @border; }
 }
 
 #themeToggleBtn, #revealBtn, #trashBtn { padding: 0; }
+
+QWidget#surfaceCard {
+    background: @field; border: 1px solid @border; border-radius: 8px;
+}
+QLabel#cardImage {
+    background: @panel; border: 1px solid @border; border-radius: 4px;
+}
+QLabel#cardSource { color: @muted; font-size: 12px; }
+QLabel#cardError { color: @muted; font-size: 12px; }
+QPushButton#cardOpenBtn {
+    background: @field; border: 1px solid @border; border-radius: 4px;
+    padding: 4px; font-size: 12px;
+}
+QPushButton#cardOpenBtn:hover:enabled { background: @hover; }
+QPushButton#cardOpenBtn:pressed:enabled { background: @pressed; }
 
 QProgressBar {
     background: @field; border: 1px solid @border; border-radius: 6px;
