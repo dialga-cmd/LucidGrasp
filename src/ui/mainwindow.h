@@ -1,6 +1,9 @@
 #pragma once
 
 #include "app/update_checker.h"
+#include "app/key_entry_server.h"
+#include "app/secret_store.h"
+#include "app/surface_scan.h"
 #include "core/index.h"
 
 #include <atomic>
@@ -17,6 +20,7 @@ class QColor;
 class QDragEnterEvent;
 class QDropEvent;
 class QGroupBox;
+class KeyEntryDialog;
 class QIcon;
 class QLabel;
 class QLineEdit;
@@ -48,10 +52,17 @@ private slots:
     void startSearch();
     void stopSearch();
     void openResult(QListWidgetItem* item);
+    void viewFullscreen();
     void revealResult();
     void trashResult();
     void toggleTheme();
     void onUpdateCheckFinished(app::CheckOutcome outcome);
+    void openKeyEntry();
+    void startSurfaceScan();
+    void onSurfaceScanFinished(const QString& error);
+    // Runs the search-button click: local index search, or surface scan,
+    // depending on the active mode.
+    void runSearchOrSurface();
 
 private:
     void tryLoadIndex(const QString& dir);
@@ -67,6 +78,15 @@ private:
     QListWidgetItem* currentResult() const;
     void showPreview(const QString& path);
     void setBusy(bool busy);
+    // Collapses the left panel to a query-image field + search button when
+    // entering surface mode, and restores the Library panel when leaving it.
+    void setSurfaceMode(bool on);
+    bool surfaceMode() const { return surfaceMode_; }
+
+    // Appends one provider's result batch to the grid as it arrives, so the
+    // user sees matches streaming in provider-by-provider rather than after
+    // the whole scan finishes.
+    void appendSurfaceBatch(const std::vector<app::SurfaceResult>& batch);
 
     bool systemPrefersDark() const;
     void setDark(bool dark);
@@ -107,10 +127,25 @@ private:
     QPushButton* revealBtn_ = nullptr;
     QPushButton* trashBtn_ = nullptr;
     QSpinBox* thresholdSpin_ = nullptr;
+    QLayout* thresholdRow_ = nullptr;
     QAction* indexAction_ = nullptr;
     QAction* queryAction_ = nullptr;
     app::UpdateChecker *updates_ = nullptr;
+    // The bring-your-own-key page. The store is owned here rather than by the
+    // server so future search code can read the same keys without the server
+    // being alive.
+    app::SecretStore secrets_;
+    app::KeyEntryServer *keyServer_ = nullptr;
+    // Created on first use and kept, so re-triggering the menu raises the same
+    // window instead of starting another server or opening another tab.
+    KeyEntryDialog *keyEntryDialog_ = nullptr;
+    // The "Check for Updates Automatically" menu item. Kept so the opt-out can
+    // be undone, and so the item's checkmark can be cleared when the dialog's
+    // "never" button is pressed.
     QAction *autoUpdateAction_ = nullptr;
+    QAction *surfaceScanAction_ = nullptr;
+    // True when the left panel is collapsed to the query-image + search form.
+    bool surfaceMode_ = false;
     bool updateCheckManual_ = false;
 
     bool darkMode_ = false;
