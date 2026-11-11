@@ -328,10 +328,11 @@ Built:
   - **SauceNAO** — multipart upload; header `similarity`, `data.title` /
     `author_name`, `data.ext_urls`, header thumbnail. Handles status `< 0` and
     `100` (rate limit).
-  - **trace.moe** — raw image body POST (not base64/form); `anilist`, `filename`,
-    `image`, `similarity` (0–1), episode/timestamps. A `400 "Failed to process
-    image"` is treated as no match, and frames below 0.90 similarity are dropped
-    because the API returns low-confidence noise for non-anime images.
+  - **trace.moe** — raw image body POST; `anilist`, `filename`,
+    `image`, `similarity` (0–1), episode/timestamps. Frames below 0.99 similarity
+    are dropped because the API's cosine distance always returns "closest"
+    results even for non-anime images (scoring 0.97–0.99); real anime frames
+    reliably score ≥ 0.99.
   - **SerpApi** — uploads the image to `/image` (JPEG, ≤ 480 KB) then calls
     `engine=google_lens&image_id=…`; reads `exact_matches` / `visual_matches`.
   - **Zenserp** — reported as unsupported for local files with a clear message,

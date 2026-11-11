@@ -20,6 +20,7 @@
 #include <QTimer>
 #include <QUrl>
 #include <QUrlQuery>
+#include <algorithm>
 
 namespace {
 
@@ -28,9 +29,11 @@ constexpr int kThumbnailTimeoutMs = 15000;
 // SauceNAO returns its whole index ranking even for images it does not know;
 // below ~0.50 the rows are unrelated noise rather than a plausible match.
 constexpr double kSauceNaoMinSimilarity = 0.50;
-// trace.moe answers with low-confidence frames even for images that are not
-// anime. Real scene matches score ~0.95+; 0.90 keeps those and drops the noise.
-constexpr double kTraceMoeMinSimilarity = 0.90;
+// trace.moe's cosine distance is not a confidence score: it always returns the
+// "closest" frame in the corpus even for non-anime images, scoring 0.97-0.99.
+// Real anime frames from the same scene reliably score >= 0.99, so that is
+// the cut-off. Below it, results are almost certainly false positives.
+constexpr double kTraceMoeMinSimilarity = 0.99;
 // Total time one provider may spend fetching thumbnails before the scan moves
 // on and leaves the remaining hits with their image URLs only.
 constexpr int kThumbnailBudgetMs = 20000;
@@ -537,7 +540,8 @@ void parseSerpApi(const QByteArray& payload, const QString& id,
         return;
     }
 
-    auto add = [&](const QJsonArray& matches, const QString& kind) {
+    auto add = [&](const QJsonArray& matches, const QString& kind,
+                   double similarity) {
         for (const QJsonValue& value : matches) {
             const QJsonObject match = value.toObject();
             app::SurfaceResult result;
@@ -555,14 +559,18 @@ void parseSerpApi(const QByteArray& payload, const QString& id,
                 match.value(QStringLiteral("thumbnail")).toString();
             if (result.thumbnail.isEmpty())
                 result.thumbnail = match.value(QStringLiteral("image")).toString();
-            result.similarity = -1.0;
+            result.similarity = similarity;
             out.push_back(result);
         }
     };
+    // SerpApi's "exact match" bucket is an exact duplicate of the query; give
+    // it a 1.0 score so it sorts to the top. "Visual match" has no per-hit
+    // confidence, so leave it at 0.0 — it still appears (no provider filter),
+    // just after all scored results.
     add(root.value(QStringLiteral("exact_matches")).toArray(),
-        QStringLiteral("exact match"));
+        QStringLiteral("exact match"), 1.0);
     add(root.value(QStringLiteral("visual_matches")).toArray(),
-        QStringLiteral("visual match"));
+        QStringLiteral("visual match"), 0.0);
 }
 
 }  // namespace
@@ -915,6 +923,24 @@ std::vector<SurfaceResult> SurfaceScan::search(
             result.thumbnailData = thumbnailFromBytes(raw);
         }
     }
+
+    // Sort the whole result set by similarity so the most confident matches
+    // surface first, regardless of which provider produced them. Results with
+    // no score (similarity == -1) come after all scored results, preserving
+    // provider order within that group.
+    std::stable_sort(
+        results.begin(), results.end(),
+        [](const SurfaceResult& a, const SurfaceResult& b) {
+            // Error rows always sink to the bottom.
+            const bool aErr = !a.error.isEmpty();
+            const bool bErr = !b.error.isEmpty();
+            if (aErr != bErr)
+                return bErr;  // non-error before error
+            if (a.similarity != b.similarity)
+                return a.similarity > b.similarity;  // highest first
+            // Both -1 (unknown) or equal scores: keep original order.
+            return false;
+        });
 
     return results;
 }
