@@ -303,13 +303,30 @@ void judgeProbe(const app::Provider& provider, int status,
     }
 
     // Everything else parks an account/profile endpoint around a 2xx for a
-    // valid key and 401/403 for a rejected one.
+    // valid key and 401/403 for a rejected one. Many of these return a JSON
+    // body with a human-readable reason (e.g. HasData's "account_under_review"),
+    // so surface it instead of just the status code.
+    auto detailFrom = [&](const QByteArray& payload) -> QString {
+        const QJsonObject root = QJsonDocument::fromJson(payload).object();
+        QString detail =
+            root.value(QStringLiteral("message")).toString();
+        if (detail.isEmpty())
+            detail = root.value(QStringLiteral("error")).toString();
+        const QString code = root.value(QStringLiteral("code")).toString();
+        if (!code.isEmpty() && detail.isEmpty())
+            detail = code;
+        return detail;
+    };
+
     if (status >= 200 && status < 300) {
         *ok = true;
         *message = QStringLiteral("Key accepted.");
     } else if (status == 401 || status == 403) {
+        const QString detail = detailFrom(body);
         *ok = false;
-        *message = QStringLiteral("Key rejected (HTTP %1).").arg(status);
+        *message = detail.isEmpty()
+                       ? QStringLiteral("Key rejected (HTTP %1).").arg(status)
+                       : QStringLiteral("Key rejected: %1").arg(detail);
     } else if (status == 0) {
         *ok = false;
         *message = netError.isEmpty()
