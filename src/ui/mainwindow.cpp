@@ -1801,18 +1801,18 @@ void MainWindow::viewFullscreen() {
   QListWidgetItem *item = currentResult();
   if (!item)
     return;
-  // Use the original-size image downloaded by the worker when available;
-  // fall back to the 128-px thumbnail otherwise.
+  // Use the original-size image downloaded by the worker when available.
+  // Load it at full resolution and let QLabel::setScaledContents resize it
+  // to fit the screen — no intermediate 2048px downscale, no blur.
   QPixmap pm;
   const QByteArray full = item->data(Qt::UserRole + 3).toByteArray();
   if (!full.isEmpty()) {
     QImage img;
     if (img.loadFromData(full))
-      pm = QPixmap::fromImage(img.scaled(
-          2048, 2048, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+      pm = QPixmap::fromImage(img);
   }
   if (pm.isNull())
-    pm = item->icon().pixmap({2048, 2048});
+    pm = item->icon().pixmap({1024, 1024});
   if (pm.isNull())
     return;
 
