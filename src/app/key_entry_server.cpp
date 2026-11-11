@@ -110,9 +110,10 @@ bool buildProbe(const app::Provider& provider, const QString& key, Probe* out,
         q.addQueryItem(QStringLiteral("api_key"), key);
         q.addQueryItem(QStringLiteral("output_type"), QStringLiteral("2"));
         q.addQueryItem(QStringLiteral("search_type"), QStringLiteral("url"));
-        q.addQueryItem(QStringLiteral("url"),
-                       QStringLiteral(
-                           "https://saucenao.com/user"));
+        q.addQueryItem(
+            QStringLiteral("url"),
+            QStringLiteral("https://upload.wikimedia.org/wikipedia/commons/4/"
+                           "47/PNG_transparency_demonstration_1.png"));
         out->method = QByteArrayLiteral("GET");
         out->url = QUrl(QStringLiteral("https://saucenao.com/search.php"));
         out->url.setQuery(q);
@@ -149,9 +150,15 @@ bool buildProbe(const app::Provider& provider, const QString& key, Probe* out,
     }
 
     if (v == QLatin1String("scraperapi")) {
-        QUrl url(QStringLiteral("https://api.scraperapi.com/account"));
+        // ScraperAPI's /account endpoint is gated on some plans: both a valid
+        // and an invalid key get HTTP 400 "your current plan does not include
+        // access to this feature", so it cannot tell us whether the key is
+        // real. Only the proxy endpoint authenticates the key, so validation
+        // makes one real request (one credit) and judges on its 200/401/403.
+        QUrl url(QStringLiteral("https://api.scraperapi.com/"));
         QUrlQuery q;
         q.addQueryItem(QStringLiteral("api_key"), key);
+        q.addQueryItem(QStringLiteral("url"), QStringLiteral("https://example.com"));
         url.setQuery(q);
         out->url = url;
         return true;
@@ -219,6 +226,13 @@ if (v == QLatin1String("saucenao")) {
             return;
         }
         const int headerStatus = header.value(QStringLiteral("status")).toInt(0);
+        if (headerStatus == -2) {
+            // Search-rate limit, not a key problem: SauceNAO resolves the key
+            // first and greets the account by name in the message.
+            *ok = true;
+            *message = QStringLiteral("Key accepted — rate limited by SauceNAO.");
+            return;
+        }
         if (headerStatus < 0) {
             const QString detail =
                 header.value(QStringLiteral("message")).toString();
