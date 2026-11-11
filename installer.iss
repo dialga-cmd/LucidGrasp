@@ -1,6 +1,6 @@
 [Setup]
 AppName=LucidGrasp
-AppVersion=1.2.5
+AppVersion=1.3.0
 AppPublisher=dialga-cmd
 AppPublisherURL=https://github.com/dialga-cmd
 AppSupportURL=https://github.com/dialga-cmd/LucidGrasp/issues

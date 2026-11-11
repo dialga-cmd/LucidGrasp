@@ -3,16 +3,35 @@
 All notable changes are listed here in reverse chronological order. History
 before 1.2.4 is on the [GitHub Releases](https://github.com/dialga-cmd/LucidGrasp/releases) page.
 
-## [Unreleased]
+## [1.3.0] - 2026-11-11
 
-- **Surface Search** is now wired end to end. Toggle
+- **Surface Scan is here: search the web with an image.** Pick a local image
+  and LucidGrasp runs it through the reverse-image and image-search providers
+  you have keys for, then lists the matching pages with thumbnails. Toggle
   **Internet → Surface Search…** (`Ctrl+Shift+S`) to collapse the left panel
-  to a query-image picker; **Search the web** runs the image through the
-  providers whose keys you added and lists the matching pages with thumbnails.
-  SauceNAO, trace.moe and SerpApi are implemented; Zenserp reports that it
-  needs a publicly hosted image URL.
-  Provider results are filtered to drop low-confidence noise, thumbnails are
-  fetched and scaled off the GUI thread, and a running scan can be stopped.
+  to a query-image picker plus a **Search the web** button.
+- **Bring your own API keys.** **Internet → Surface Scan — API Keys…** opens a
+  local setup page where keys are entered, validated, synced and removed.
+  Keys never ship with the app; they are stored in the OS keychain when
+  available, with an owner-only settings-file fallback and environment
+  overrides.
+- **Eight providers with recurring free tiers.** SauceNAO, trace.moe and
+  SerpApi (Google Lens) run reverse-image search; Zenserp is supported for
+  publicly reachable image URLs. HasData, ScraperAPI, Scrape.do and ZenRows
+  are registered with validated keys for the image-to-keyword stage. Providers
+  without recurring self-serve credits (Outscraper, Serpstack and Google Cloud
+  Vision) were dropped.
+- **Results you can sort through.** Each provider's batch is rendered as soon
+  as it finishes, results are ranked by similarity across providers, and
+  low-confidence noise is filtered out (SauceNAO below 0.50, trace.moe below
+  the documented 0.90 cutoff). Every card shows the thumbnail, the source
+  name and an **Open in browser** button; clicking the image opens it
+  fullscreen at native resolution.
+- Network work, thumbnail downloads and scaling run off the GUI thread, and a
+  running scan can be stopped. Preview decoding is capped to stay under Qt's
+  image-allocation limit.
+- Validation reports each provider's own error detail, and key handling is
+  hardened against leaks.
 - The update dialog now shows the **complete release notes** instead of
   truncating them after 700 characters, and renders them as **Markdown**
   (headings, lists, links, bold) in a scrollable view.
