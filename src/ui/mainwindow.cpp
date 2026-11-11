@@ -1175,14 +1175,48 @@ void MainWindow::appendSurfaceBatch(
     if (!thumb.isNull())
       icon = QIcon(thumb);
 
-    auto* item = new QListWidgetItem(icon, label);
+    auto* item = new QListWidgetItem(label);
     item->setData(Qt::UserRole, r.url);
     item->setData(Qt::UserRole + 1, r.provider);
     item->setData(Qt::UserRole + 2, QVariant(1));  // sentinel: web result
+    if (!r.fullImage.isEmpty())
+      item->setData(Qt::UserRole + 3, r.fullImage);
     if (!tooltip.isEmpty())
       item->setToolTip(tooltip);
+
+    // Compose a container widget: the thumbnail image on top, an "Open in
+    // browser" button underneath, so the button lives per-item rather than in
+    // a shared toolbar.
+    auto* container = new QWidget;
+    auto* vLayout = new QVBoxLayout(container);
+    vLayout->setContentsMargins(0, 0, 0, 0);
+    vLayout->setSpacing(4);
+
+    if (!thumb.isNull()) {
+      auto* imgLabel = new QLabel(container);
+      imgLabel->setPixmap(thumb.scaled(
+          128, 128, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+      imgLabel->setAlignment(Qt::AlignCenter);
+      vLayout->addWidget(imgLabel, 0, Qt::AlignTop);
+    }
+
+    if (!r.error.isEmpty()) {
+      vLayout->addWidget(new QLabel(r.error.left(40), container));
+    } else {
+      auto* openBtn = new QPushButton(QStringLiteral("Open in browser"), container);
+      openBtn->setObjectName(QStringLiteral("openBtn"));
+      openBtn->setCursor(Qt::PointingHandCursor);
+      connect(openBtn, &QPushButton::clicked, this, [this, item] {
+        const QString url = item->data(Qt::UserRole).toString();
+        if (!url.isEmpty())
+          QDesktopServices::openUrl(QUrl(url));
+      });
+      vLayout->addWidget(openBtn);
+    }
+
     item->setSizeHint({170, 200});
     results_->addItem(item);
+    results_->setItemWidget(item, container);
   }
 
   // Keep the status line live while results stream in.
@@ -1793,9 +1827,18 @@ void MainWindow::viewFullscreen() {
   QListWidgetItem *item = currentResult();
   if (!item)
     return;
-  // The item's icon holds the worker-thread thumbnail; fetch it at a large
-  // size for the fullscreen view.
-  const QPixmap pm = item->icon().pixmap({2048, 2048});
+  // Use the original-size image downloaded by the worker when available;
+  // fall back to the 128-px thumbnail otherwise.
+  QPixmap pm;
+  const QByteArray full = item->data(Qt::UserRole + 3).toByteArray();
+  if (!full.isEmpty()) {
+    QImage img;
+    if (img.loadFromData(full))
+      pm = QPixmap::fromImage(img.scaled(
+          2048, 2048, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+  }
+  if (pm.isNull())
+    pm = item->icon().pixmap({2048, 2048});
   if (pm.isNull())
     return;
 

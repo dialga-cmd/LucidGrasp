@@ -17,6 +17,7 @@ struct SurfaceResult {
     QString url;
     QString thumbnail;      // image URL reported by the provider, may be empty
     QByteArray thumbnailData;  // small PNG fetched by the worker; decoded on the GUI thread
+    QByteArray fullImage;   // original-size image bytes fetched by the worker, used for fullscreen
     double similarity = 0.0;  // 0-1 where the provider gives a score; -1 when unknown
     QString extra;         // provider-specific note (e.g. trace.moe episode/timestamps)
     QString error;        // non-empty when this provider returned no usable result

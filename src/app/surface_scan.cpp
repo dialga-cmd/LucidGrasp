@@ -919,6 +919,8 @@ std::vector<SurfaceResult> SurfaceScan::search(
                 !result.thumbnailData.isEmpty())
                 continue;
             const QByteArray raw = fetchBytes(net, result.thumbnail);
+            if (!raw.isEmpty())
+              result.fullImage = raw;
             result.thumbnailData = thumbnailFromBytes(raw);
         }
 
