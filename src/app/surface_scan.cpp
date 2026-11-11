@@ -29,11 +29,12 @@ constexpr int kThumbnailTimeoutMs = 15000;
 // SauceNAO returns its whole index ranking even for images it does not know;
 // below ~0.50 the rows are unrelated noise rather than a plausible match.
 constexpr double kSauceNaoMinSimilarity = 0.50;
-// trace.moe's cosine distance is not a confidence score: it always returns the
-// "closest" frame in the corpus even for non-anime images, scoring 0.97-0.99.
-// Real anime frames from the same scene reliably score >= 0.99, so that is
-// the cut-off. Below it, results are almost certainly false positives.
-constexpr double kTraceMoeMinSimilarity = 0.99;
+// trace.moe always returns the "closest" frame in its corpus, even for images
+// that are not anime, so a match alone is not evidence. Its API docs state
+// that anything below 0.90 is most likely an incorrect result; that is the
+// documented cut-off, and it keeps real anime frames while still dropping the
+// long tail. The service has no separate confidence field.
+constexpr double kTraceMoeMinSimilarity = 0.90;
 // Total time one provider may spend fetching thumbnails before the scan moves
 // on and leaves the remaining hits with their image URLs only.
 constexpr int kThumbnailBudgetMs = 20000;
@@ -747,7 +748,7 @@ std::vector<SurfaceResult> SurfaceScan::search(
 
         // Hand this provider's slice to the caller so it can render the grid
         // one provider at a time instead of waiting for the whole scan.
-        if (onBatch && !cancel()) {
+        if (onBatch && (!cancel || !cancel())) {
             std::vector<SurfaceResult> slice(
                 results.begin() + firstResult, results.end());
             // Order this provider's own hits by similarity so the best
