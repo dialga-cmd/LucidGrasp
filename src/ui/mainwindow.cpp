@@ -1075,7 +1075,8 @@ void MainWindow::startSurfaceScan() {
   results_->clear();
 
   // Run the network calls off the GUI thread so the window never freezes; the
-  // progress and the finished callback are marshalled back with queued invokes.
+  // progress, per-provider batch, and finished callbacks are marshalled back
+  // with queued invokes.
   searchWorker_ = std::thread([this, query] {
     std::vector<app::SurfaceResult> results;
     QString error;
@@ -1083,6 +1084,7 @@ void MainWindow::startSurfaceScan() {
       app::SurfaceScan scan(&secrets_);
       results = scan.search(
           query,
+          // Progress callback — updates the status line while waiting.
           [this](int done, int total, const QString& current) {
             QMetaObject::invokeMethod(
                 this,
@@ -1095,6 +1097,14 @@ void MainWindow::startSurfaceScan() {
                 },
                 Qt::QueuedConnection);
           },
+          // Batch callback — fires on the worker thread after each provider
+          // has finished (and its thumbnails fetched). Marshal to GUI.
+          [this](const std::vector<app::SurfaceResult>& batch) {
+            QMetaObject::invokeMethod(
+                this,
+                [this, batch] { appendSurfaceBatch(batch); },
+                Qt::QueuedConnection);
+          },
           [this]() -> bool { return cancel_.load(); });
     } catch (const std::exception& e) {
       error = QString::fromUtf8(e.what());
@@ -1104,15 +1114,57 @@ void MainWindow::startSurfaceScan() {
 
     QMetaObject::invokeMethod(
         this,
-        [this, results = std::move(results), error = std::move(error)]() mutable {
-          onSurfaceScanFinished(std::move(results), error);
+        [this, error = std::move(error)]() mutable {
+          onSurfaceScanFinished(error);
         },
         Qt::QueuedConnection);
   });
 }
 
-void MainWindow::onSurfaceScanFinished(
-    std::vector<app::SurfaceResult> results, const QString& error) {
+void MainWindow::appendSurfaceBatch(
+    const std::vector<app::SurfaceResult>& batch) {
+  for (const auto& r : batch) {
+    QString label;
+    if (!r.error.isEmpty()) {
+      label = r.providerName + QStringLiteral(" — ") + r.error;
+    } else {
+      label = r.providerName + QStringLiteral(": ");
+      if (!r.title.isEmpty())
+        label += r.title;
+      if (r.similarity >= 0.0)
+        label += QStringLiteral(" (%1%)").arg(int(r.similarity * 100.0));
+      if (!r.extra.isEmpty())
+        label += QStringLiteral("\n") + r.extra;
+    }
+
+    QPixmap thumb;
+    if (r.error.isEmpty() && !r.thumbnailData.isEmpty()) {
+      QImage image;
+      if (image.loadFromData(r.thumbnailData, "PNG"))
+        thumb = QPixmap::fromImage(image);
+    }
+    QIcon icon;
+    if (!thumb.isNull())
+      icon = QIcon(thumb);
+
+    auto* item = new QListWidgetItem(icon, label);
+    item->setData(Qt::UserRole, r.url);
+    item->setData(Qt::UserRole + 1, r.provider);
+    item->setData(Qt::UserRole + 2, QVariant(1));  // sentinel: web result
+    if (!r.url.isEmpty())
+      item->setToolTip(r.url + (r.thumbnail.isEmpty() ? QString()
+                                                     : QStringLiteral("\n") +
+                                                         r.thumbnail));
+    item->setSizeHint({170, 200});
+    results_->addItem(item);
+  }
+
+  // Keep the status line live while results stream in.
+  stats_->setText(QStringLiteral("Surface scan… %1 result(s) so far.")
+                     .arg(results_->count()));
+}
+
+void MainWindow::onSurfaceScanFinished(const QString& error) {
   if (searchWorker_.joinable())
     searchWorker_.join();
 
@@ -1134,52 +1186,7 @@ void MainWindow::onSurfaceScanFinished(
     return;
   }
 
-  // Split real hits from per-provider errors so the grid shows both.
-  int hits = 0;
-  for (const auto& r : results)
-    if (r.error.isEmpty())
-      ++hits;
-
-  // Thumbnails were downloaded and pre-scaled on the worker thread; all that is
-  // left here is decoding the small PNGs, which is cheap.
-  results_->clear();
-  for (const auto& r : results) {
-    QString label;
-    if (!r.error.isEmpty()) {
-      label = r.providerName + QStringLiteral(" — ") + r.error;
-    } else {
-      label = r.providerName + QStringLiteral(": ");
-      if (!r.title.isEmpty())
-        label += r.title;
-      if (r.similarity >= 0.0)
-        label += QStringLiteral(" (%1%)").arg(int(r.similarity * 100.0));
-      if (!r.extra.isEmpty())
-        label += QStringLiteral("\n") + r.extra;
-    }
-
-    // The thumbnail is the most useful visual here; fall back to the provider
-    // name when a hit has no image.
-    QPixmap thumb;
-    if (r.error.isEmpty() && !r.thumbnailData.isEmpty()) {
-      QImage image;
-      if (image.loadFromData(r.thumbnailData, "PNG"))
-        thumb = QPixmap::fromImage(image);
-    }
-    QIcon icon;
-    if (!thumb.isNull())
-      icon = QIcon(thumb);
-
-    auto* item = new QListWidgetItem(icon, label);
-    item->setData(Qt::UserRole, r.url);
-    item->setData(Qt::UserRole + 1, r.provider);
-    item->setData(Qt::UserRole + 2, QVariant(1));  // sentinel: web result
-    if (!r.url.isEmpty())
-      item->setToolTip(r.url + (r.thumbnail.isEmpty() ? QString()
-                                                     : QStringLiteral("\n") + r.thumbnail));
-    item->setSizeHint({170, 200});
-    results_->addItem(item);
-  }
-
+  const int hits = results_->count();
   stats_->setText(hits == 0
                      ? QStringLiteral("No web matches found.")
                      : QStringLiteral("Surface scan complete — %1 result(s).")

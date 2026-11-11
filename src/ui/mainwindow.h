@@ -58,8 +58,7 @@ private slots:
     void onUpdateCheckFinished(app::CheckOutcome outcome);
     void openKeyEntry();
     void startSurfaceScan();
-    void onSurfaceScanFinished(std::vector<app::SurfaceResult> results,
-                               const QString& error);
+    void onSurfaceScanFinished(const QString& error);
     // Runs the search-button click: local index search, or surface scan,
     // depending on the active mode.
     void runSearchOrSurface();
@@ -82,6 +81,11 @@ private:
     // entering surface mode, and restores the Library panel when leaving it.
     void setSurfaceMode(bool on);
     bool surfaceMode() const { return surfaceMode_; }
+
+    // Appends one provider's result batch to the grid as it arrives, so the
+    // user sees matches streaming in provider-by-provider rather than after
+    // the whole scan finishes.
+    void appendSurfaceBatch(const std::vector<app::SurfaceResult>& batch);
 
     bool systemPrefersDark() const;
     void setDark(bool dark);

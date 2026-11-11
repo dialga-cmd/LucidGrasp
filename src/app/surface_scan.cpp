@@ -563,14 +563,12 @@ void parseSerpApi(const QByteArray& payload, const QString& id,
             out.push_back(result);
         }
     };
-    // SerpApi's "exact match" bucket is an exact duplicate of the query; give
-    // it a 1.0 score so it sorts to the top. "Visual match" has no per-hit
-    // confidence, so leave it at 0.0 — it still appears (no provider filter),
-    // just after all scored results.
+    // SerpApi's Lens engine returns no per-hit similarity, so use -1 (unknown)
+    // rather than 0.0 to keep the grid from printing a misleading "(0%)".
     add(root.value(QStringLiteral("exact_matches")).toArray(),
         QStringLiteral("exact match"), 1.0);
     add(root.value(QStringLiteral("visual_matches")).toArray(),
-        QStringLiteral("visual match"), 0.0);
+        QStringLiteral("visual match"), -1.0);
 }
 
 }  // namespace
@@ -582,6 +580,7 @@ SurfaceScan::SurfaceScan(SecretStore* store) : store_(store) {}
 std::vector<SurfaceResult> SurfaceScan::search(
     const QString& imagePath,
     const SurfaceProgress& onProgress,
+    const SurfaceBatch& onBatch,
     const std::function<bool()>& cancel)
 {
     std::vector<SurfaceResult> results;
@@ -922,23 +921,47 @@ std::vector<SurfaceResult> SurfaceScan::search(
             const QByteArray raw = fetchBytes(net, result.thumbnail);
             result.thumbnailData = thumbnailFromBytes(raw);
         }
+
+        // Hand this provider's slice to the caller so it can render the grid
+        // one provider at a time instead of waiting for the whole scan.
+        if (onBatch && !cancel()) {
+            std::vector<SurfaceResult> slice(
+                results.begin() + firstResult, results.end());
+            // Order this provider's own hits by similarity so the best
+            // matches from each provider appear first, even before the
+            // global sort runs at the end.
+            std::stable_sort(
+                slice.begin(), slice.end(),
+                [](const SurfaceResult& a, const SurfaceResult& b) {
+                    if (a.error.isEmpty() != b.error.isEmpty())
+                        return !a.error.isEmpty();  // hits before errors
+                    if (a.similarity >= 0.0 && b.similarity >= 0.0)
+                        return a.similarity > b.similarity;
+                    if (a.similarity < 0.0 && b.similarity < 0.0)
+                        return false;  // preserve order among unknowns
+                    return a.similarity >= 0.0;  // scored before unknown
+                });
+            onBatch(slice);
+        }
     }
 
-    // Sort the whole result set by similarity so the most confident matches
-    // surface first, regardless of which provider produced them. Results with
-    // no score (similarity == -1) come after all scored results, preserving
-    // provider order within that group.
+    // Sort the whole result set so the most confident matches surface first
+    // regardless of provider. Results with similarity -1 (provider does not
+    // report a score) come after all scored rows. Error rows sink to the
+    // bottom. stable_sort preserves provider order within each band.
     std::stable_sort(
         results.begin(), results.end(),
         [](const SurfaceResult& a, const SurfaceResult& b) {
-            // Error rows always sink to the bottom.
             const bool aErr = !a.error.isEmpty();
             const bool bErr = !b.error.isEmpty();
             if (aErr != bErr)
                 return bErr;  // non-error before error
-            if (a.similarity != b.similarity)
-                return a.similarity > b.similarity;  // highest first
-            // Both -1 (unknown) or equal scores: keep original order.
+            const bool aScored = a.similarity >= 0.0;
+            const bool bScored = b.similarity >= 0.0;
+            if (aScored != bScored)
+                return aScored;  // scored rows before unknown-score rows
+            if (aScored && bScored && a.similarity != b.similarity)
+                return a.similarity > b.similarity;
             return false;
         });
 

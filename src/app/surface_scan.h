@@ -25,6 +25,11 @@ struct SurfaceResult {
 // Progress callback: (done, total, currentProvider).
 using SurfaceProgress = std::function<void(int done, int total, const QString& current)>;
 
+// Fired on the calling thread after each provider's results are ready.
+// Callers should marshal it to the GUI thread. The batch is the slice of
+// results produced by this provider only, already ordered by similarity.
+using SurfaceBatch = std::function<void(const std::vector<SurfaceResult>& batch)>;
+
 // Runs the reverse-image search across every enabled provider for an image
 // file on disk. Calls the progress callback on each provider start/finish.
 //
@@ -41,9 +46,14 @@ public:
     // `cancel` is polled before each provider and while thumbnails download;
     // when it returns true the scan stops early and the results collected so
     // far are still returned.
+    // `onBatch` (optional) is called on this thread after each provider's
+    // results are parsed and their thumbnails fetched, so a caller can render
+    // them one provider at a time without waiting for the whole scan to
+    // finish. The returned vector is the full accumulated list.
     std::vector<SurfaceResult>
     search(const QString& imagePath,
            const SurfaceProgress& onProgress = nullptr,
+           const SurfaceBatch& onBatch = nullptr,
            const std::function<bool()>& cancel = nullptr);
 
 private:
