@@ -1490,6 +1490,16 @@ void MainWindow::browseQuery() {
 void MainWindow::showPreview(const QString &path) {
   QImageReader reader(path);
   reader.setAutoTransform(true);
+  const QSize native = reader.size();
+  if (!native.isValid() || native.isEmpty()) {
+    preview_->setText(QStringLiteral("cannot load"));
+    return;
+  }
+  // Cap the decode so a 12000x12000 photo can never blow past Qt's 256 MB
+  // image allocation limit before it is scaled down for the small preview.
+  const int kPreviewMax = 512;
+  reader.setScaledSize(native.scaled(QSize(kPreviewMax, kPreviewMax),
+                                     Qt::KeepAspectRatio));
   const QImage img = reader.read();
   if (img.isNull()) {
     preview_->setText(QStringLiteral("cannot load"));
