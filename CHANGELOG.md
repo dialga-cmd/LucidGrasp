@@ -9,8 +9,8 @@ before 1.2.4 is on the [GitHub Releases](https://github.com/dialga-cmd/LucidGras
   **Internet → Surface Search…** (`Ctrl+Shift+S`) to collapse the left panel
   to a query-image picker; **Search the web** runs the image through the
   providers whose keys you added and lists the matching pages with thumbnails.
-  Google Cloud Vision Web Detection, SauceNAO, trace.moe and SerpApi are
-  implemented; Zenserp reports that it needs a publicly hosted image URL.
+  SauceNAO, trace.moe and SerpApi are implemented; Zenserp reports that it
+  needs a publicly hosted image URL.
   Provider results are filtered to drop low-confidence noise, thumbnails are
   fetched and scaled off the GUI thread, and a running scan can be stopped.
 - The update dialog now shows the **complete release notes** instead of

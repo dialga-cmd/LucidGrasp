@@ -48,21 +48,9 @@ real, official APIs (not scrapers), and they fit the BYO-key model.
 
 | Platform | API | Auth | Input | Free tier | Paid |
 |---|---|---|---|---|---|
-| **Google Cloud Vision — Web Detection** | `POST https://vision.googleapis.com/v1/images:annotate` (`WEB_DETECTION`) | GCP API key or service-account OAuth2 | Image (base64 / GCS / URL) | **First 1,000 units/month free** | **$3.50 / 1,000 units** (units 1,001–5,000,000); above 5M contact Google |
 | **SauceNAO** | `POST https://saucenao.com/search.php?output_type=2` | API key (free account; `api_key`) | Image URL or upload | Free key; short-window request limits | Free |
 | **trace.moe** | `POST https://api.trace.moe/search` | None (anonymous) or `x-trace-key` | Image URL / base64 / upload | **~1,000 searches/month per IP** anonymous | Optional supporter key raises quota |
 
-### Google Cloud Vision — Web Detection
-- Returns: `fullMatchingImages`, `partialMatchingImages`, `pagesWithMatchingImages`,
-  `visuallySimilarImages`, `webEntities`, `bestGuessLabels`.
-- **This is not Google Lens.** Lens has no public API; Vision Web Detection is the closest
-  official capability and its results are sparser than the Lens UI.
-- Billing unit = **one feature applied to one image**. A single `WEB_DETECTION` request is
-  1 unit, so 1,000 free images/month, then $3.50/1,000.
-- Quotas are per GCP project and can be raised; the free 1,000/month is the practical cap
-  for a no-billing key.
-- Verdict: **usable** — official, general web-wide, BYO GCP key. Needs a billing account
-  to exceed 1,000/month.
 
 ### SauceNAO
 - Purpose: reverse-search **art / anime** images against known source databases (Pixiv,
@@ -92,7 +80,6 @@ public reverse-image API and none grants recurring credits.
 |---|---|
 | **Bing Visual Search** | **Retired 2025-08-11** with the whole Bing Search API family (Web/Image/Video/News/Entity/Autosuggest/SpellCheck/Visual/Custom). Existing keys return `410 Gone`. |
 | **Google Lens** | **No official public API.** Anything advertising a "Google Lens API" is scraping Google. |
-| **Google Reverse Image** | Consumer web tool only; no endpoint. Use Cloud Vision Web Detection instead. |
 | **Yandex** | **No official reverse-image API.** Only scrapeable (see §3). |
 | **IQDB** | Anime/art reverse search, but **no official API** — web form only. |
 | **Google Custom Search JSON** | **Closed to new customers**; existing use ends **2027-01-01** → migrate to Vertex AI Search. |
@@ -139,7 +126,6 @@ per request, so per-1K-image and per-1K-request figures differ.
 | **ScraperAPI** | General scraping + Google Images (no Lens/reverse) | `api_key` | **1,000/mo** (+5,000 first 7 days) | $49/mo 100,000 credits | Keyword-bridge only (no Lens) |
 | **Scrape.do** | SERP API (no reverse) | API key | **1,000 credits/mo** | ~$1.16/1K | Keyword-bridge only |
 | **ZenRows** | SERP / general scraping (no reverse) | API key | **5,000 credits/mo** | $16/mo 45K | Keyword-bridge only |
-| **Serpstack** | Google SERP | API key | **100 requests/mo** | $29.99/mo | Keyword-bridge only |
 
 Providers dropped by the recurring-credit rule (one-time trial only) and the gated
 platforms are recorded in §9.2.
@@ -151,7 +137,7 @@ platforms are recorded in §9.2.
 Strategy note first, because it governs the "Keyword handling" column:
 
 **Image → keyword bridge.** For platforms that only do text search, run the selected image
-through a reverse-capable provider first (Cloud Vision `bestGuessLabels` / `webEntities`,
+through a reverse-capable provider first (SauceNAO titles, SerpApi labels,
 SauceNAO titles, trace.moe titles) or a local caption/label model, then feed those terms
 into the keyword API. Keyword platforms are therefore *second-stage* providers in the same
 flow, not standalone surface-scan sources.
@@ -161,7 +147,6 @@ research time — verify exact paths and auth before coding.
 
 | Platform | Category | API structure | Keyword handling | Recurring free credits |
 |---|---|---|---|---|
-| **Google Cloud Vision** (Web Detection) | Official reverse | `POST vision.googleapis.com/v1/images:annotate?key=KEY` · body `{"requests":[{"image":{"content":b64},"features":[{"type":"WEB_DETECTION"}]}]}` → `webDetection.{fullMatchingImages,partialMatchingImages,pagesWithMatchingImages,visuallySimilarImages,webEntities,bestGuessLabels}` | Native reverse; its labels feed keyword APIs | 1,000 units/mo |
 | **SauceNAO** | Official reverse (art/anime) | `POST saucenao.com/search.php` multipart · `api_key`, `output_type=2`, `file`\|`url`, `db`, `numres` → `results[].header.similarity` + `data.*` | Native; result titles → keywords | Free key (short-window limits) |
 | **trace.moe** | Official reverse (anime) | `POST api.trace.moe/search?url=…` (or file) · optional `X-Trace-Key` → `{result:[{anilist,mal,episode,from,to,similarity,video,image}]}` | Native anime scene | ~1,000/mo per IP |
 | **SerpApi** | Third-party reverse | `GET serpapi.com/search?engine=google_lens&url=<img>&api_key=…` · engines `google_lens`, `google_reverse_image`, `yandex_images`, `google_images` → `visual_matches[]`,`exact_matches[]` | `engine=google_images` | 250/mo |
@@ -170,10 +155,9 @@ research time — verify exact paths and auth before coding.
 | **ScraperAPI** | Keyword/general | `GET api.scraperapi.com/?api_key=&url=<Google Images URL>&render=true` → HTML | Image→keywords, then scrape | 1,000/mo |
 | **Scrape.do** | Keyword/general | `GET api.scrape.do/?token=&url=` → SERP | keyword SERP | 1,000/mo |
 | **ZenRows** | Keyword/general | `GET /?apikey=&url=&mode=auto` → HTML/JSON | keyword SERP | 5,000/mo |
-| **Serpstack** | Keyword/general | `GET ?access_key=&query=` → JSON | keyword SERP | 100/mo |
 
 ### Reading the matrix
-- **Reverse-native** (Cloud Vision, SauceNAO, trace.moe, SerpApi, Zenserp): input is the
+- **Reverse-native** (SauceNAO, trace.moe, SerpApi, Zenserp): input is the
   image directly.
 - **Keyword rows** (bottom): not usable alone for a surface scan; only useful after the
   image→keyword bridge above.
@@ -185,7 +169,6 @@ research time — verify exact paths and auth before coding.
 ## 6. Recommended set
 
 1. **Documented / first-class (official):**
-   - **Google Cloud Vision — Web Detection** (general web, 1,000 free/mo then $3.50/1K).
    - **SauceNAO** (art/anime sources, free).
    - **trace.moe** (anime scenes, free).
 2. **Optional bring-your-own-key reverse wrappers (unofficial):**
@@ -194,7 +177,7 @@ research time — verify exact paths and auth before coding.
 3. **Crawler path:** Yandex CBIR, explicitly consented, verified locally with
    `CvMatcher` / pHash — never the sole discovery source.
 4. **Keyword-bridge providers (recurring credits):** SerpApi, Zenserp, HasData,
-   ScraperAPI, Scrape.do, ZenRows, Serpstack — used only after the
+   ScraperAPI, Scrape.do, ZenRows — used only after the
    image→keyword bridge.
 5. **Excluded:** all one-time-trial-only and gated platforms (§9.2), and everything in
    §2.
@@ -222,14 +205,13 @@ research time — verify exact paths and auth before coding.
 
 ## 8. Open questions / to verify
 
-- Google Cloud Vision: confirm Web Detection quality vs. Lens for the app's image types,
   and whether a no-billing key's 1,000/month is enough; confirm current GCP quota defaults.
 - SauceNAO / trace.moe: confirm current key issuance and per-account rate limits, and that
   both are acceptable for a desktop client's BYO-key use.
 - Yandex: confirm CBIR still works through a stealth/residential scraping vendor and
   current credit cost at build time; the crawler stays verifier-only.
-- Kept vendors (SerpApi, Zenserp, HasData, ScraperAPI, Scrape.do, ZenRows,
-  Serpstack): re-check free tiers and prices at implementation time (they move), and read
+- Kept vendors (SerpApi, Zenserp, HasData, ScraperAPI, Scrape.do, ZenRows):
+  re-check free tiers and prices at implementation time (they move), and read
   each vendor's ToS on desktop / "bring-your-own-key" redistribution.
 - Reconsider if the recurring-credit rule is relaxed: the excluded one-time-trial
   providers in §9.2 (Serper.dev, ScrapingBee, Scrapingdog, SearchApi.io, Oxylabs, Apify,
@@ -242,13 +224,12 @@ research time — verify exact paths and auth before coding.
 ## 9. How to obtain each API — (verified Oct 2026)
 
 Rule: self-serve from the vendor's website **and** recurring (monthly / daily / hourly)
-credits. 10 platforms qualify.
+credits. 8 platforms qualify.
 
-### 9.1 Kept — self-serve with recurring credits (11)
+### 9.1 Kept — self-serve with recurring credits (8)
 
 | Platform | Where to get the key | Recurring free credits | Card / KYC |
 |---|---|---|---|
-| Google Cloud Vision | GCP Console → enable Cloud Vision API → Credentials | 1,000 units/mo | Card (billing account) |
 | SauceNAO | `saucenao.com` → user.php?page=search-api | Free API for registered users (short-window limits) | No |
 | trace.moe | No key needed; optional donor key at `trace.moe/account` | ~1,000 searches/mo per IP | No |
 | SerpApi | `serpapi.com` → register → dashboard | 250 searches/mo | Card for free plan (anti-fraud) |
@@ -257,7 +238,6 @@ credits. 10 platforms qualify.
 | ScraperAPI | `scraperapi.com` → sign up | 1,000 credits/mo (+5,000 first 7 days) | No |
 | Scrape.do | `scrape.do` → sign up | 1,000 credits/mo | No |
 | ZenRows | `zenrows.com` → sign up | 5,000 credits/mo | No |
-| Serpstack | `serpstack.com` → sign up | 100 requests/mo | No |
 
 ### 9.2 Excluded — one-time trial only, or gated (not used)
 
@@ -306,7 +286,7 @@ Built:
 - `SecretStore` — layered key storage, precedence `environment > OS keychain >
   owner-only INI` (`0600`), plus a mask that shows only the tail. The browser never
   receives a key, only the mask.
-- `providers.cpp` — the ten kept providers (§9.1) as pure data, each with display
+- `providers.cpp` — the eight kept providers (§9.1) as pure data, each with display
   name, category, description, signup URL and a step-by-step signup walkthrough.
 - `KeyEntryServer` — loopback HTTP server on an OS-assigned port. Per-session random
   token, `Host` check, `Origin` check, length-independent token compare. Endpoints:
@@ -320,8 +300,6 @@ Built:
   token compare and the host check.
 - `SurfaceScan` (`surface_scan.{h,cpp}`) — runs the reverse-native providers that
   have a key and parses their hits into one `SurfaceResult` list:
-  - **Google Cloud Vision** — `images:annotate` + `WEB_DETECTION`; pages, matching /
-    visually-similar images, web entities and best-guess labels.
   - **SauceNAO** — multipart upload; header `similarity`, `data.title` /
     `author_name`, `data.ext_urls`, header thumbnail. Handles status `< 0` and
     `100` (rate limit).
@@ -346,7 +324,6 @@ Validation probes (one-shot, server-side in C++):
 
 | Provider | Probe |
 |---|---|
-| Google Cloud Vision | `images:annotate` with a 1×1 PNG, `LABEL_DETECTION` (1 unit) |
 | SauceNAO | `search.php` |
 | trace.moe | `GET /me` (keyless-safe); optional `x-trace-key` — invalid key → `403` |
 | SerpApi | `/account` |
@@ -355,7 +332,6 @@ Validation probes (one-shot, server-side in C++):
 | ScraperAPI | `/account` |
 | Scrape.do | `/info` |
 | ZenRows | `v1/?apikey=&url=` |
-| Serpstack | `/account` |
 
 Not built:
 

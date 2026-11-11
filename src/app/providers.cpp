@@ -6,26 +6,6 @@ const QVector<Provider>& providers()
 {
     // Clang-format off
     static const QVector<Provider> list = {
-        // --- Official reverse-image-search platforms -------------------------
-        {
-            QStringLiteral("google_vision"),
-            QStringLiteral("Google Cloud Vision — Web Detection"),
-            QStringLiteral("Google Vision"),
-            QStringLiteral("Official reverse image search"),
-            QStringLiteral("Google's official web-wide reverse lookup: full/partial matches, pages, visually similar images."),
-            QStringLiteral("https://console.cloud.google.com/apis/credentials"),
-            true,
-            QStringLiteral("google_vision"),
-            {
-                QStringLiteral("Open console.cloud.google.com and sign in with a Google account."),
-                QStringLiteral("If asked, accept the terms. Create a project: click the project picker in the top bar → New project → name it → Create."),
-                QStringLiteral("In the search box at the top, type \"Cloud Vision API\", open it, and click Enable."),
-                QStringLiteral("Enable billing for the project. Vision includes 1,000 free units every month, but Google still requires a billing account: Billing → Link a billing account → add a card."),
-                QStringLiteral("Go to APIs & Services → Credentials → Create credentials → API key."),
-                QStringLiteral("Copy the key that appears. (Optional: click Restrict key and limit it to the Cloud Vision API.)"),
-                QStringLiteral("Paste the key here and click Validate."),
-            },
-        },
         {
             QStringLiteral("saucenao"),
             QStringLiteral("SauceNAO"),
@@ -162,23 +142,6 @@ const QVector<Provider>& providers()
                 QStringLiteral("Register with your email, confirm it, then log in."),
                 QStringLiteral("On the Dashboard, copy the API Key shown at the top."),
                 QStringLiteral("The free plan includes 5,000 credits/month."),
-                QStringLiteral("Paste it here and click Validate."),
-            },
-        },
-        {
-            QStringLiteral("serpstack"),
-            QStringLiteral("Serpstack"),
-            QStringLiteral("Serpstack"),
-            QStringLiteral("Keyword / general"),
-            QStringLiteral("Google SERP as JSON. Text search only."),
-            QStringLiteral("https://serpstack.com/signup/free"),
-            true,
-            QStringLiteral("serpstack"),
-            {
-                QStringLiteral("Go to serpstack.com and click Sign up (Free)."),
-                QStringLiteral("Register with your email, confirm it, then log in."),
-                QStringLiteral("Open the Dashboard and copy your API access key."),
-                QStringLiteral("The free plan includes 100 requests/month."),
                 QStringLiteral("Paste it here and click Validate."),
             },
         },

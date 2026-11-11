@@ -78,13 +78,6 @@ struct Probe {
     QVector<QPair<QByteArray, QByteArray>> headers;
 };
 
-// One-pixel transparent PNG, used only to make the Vision request well-formed.
-// A LABEL_DETECTION call is one billable unit, which is the cost of admitting a
-// GCP key; there is no free "is this key real" endpoint.
-const QByteArray kOnePixelPng = QByteArrayLiteral(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
-    "+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==");
-
 bool buildProbe(const app::Provider& provider, const QString& key, Probe* out,
                 QString* error)
 {
@@ -106,29 +99,6 @@ bool buildProbe(const app::Provider& provider, const QString& key, Probe* out,
         if (error)
             *error = QStringLiteral("Enter a key first.");
         return false;
-    }
-
-    if (v == QLatin1String("google_vision")) {
-        const QJsonObject image{{QStringLiteral("content"),
-                                 QString::fromLatin1(kOnePixelPng)}};
-        const QJsonObject feature{{QStringLiteral("type"),
-                                   QStringLiteral("LABEL_DETECTION")},
-                                  {QStringLiteral("maxResults"), 1}};
-        const QJsonArray features{feature};
-        const QJsonObject one{{QStringLiteral("image"), image},
-                              {QStringLiteral("features"), features}};
-        const QJsonArray requests{one};
-        const QJsonObject root{{QStringLiteral("requests"), requests}};
-
-        QUrl url(QStringLiteral("https://vision.googleapis.com/v1/images:annotate"));
-        QUrlQuery q;
-        q.addQueryItem(QStringLiteral("key"), key);
-        url.setQuery(q);
-        out->method = QByteArrayLiteral("POST");
-        out->url = url;
-        out->body = jsonBytes(root);
-        out->contentType = QByteArrayLiteral("application/json");
-        return true;
     }
 
     if (v == QLatin1String("saucenao")) {
@@ -207,15 +177,6 @@ bool buildProbe(const app::Provider& provider, const QString& key, Probe* out,
         return true;
     }
 
-    if (v == QLatin1String("serpstack")) {
-        QUrl url(QStringLiteral("https://api.serpstack.com/account"));
-        QUrlQuery q;
-        q.addQueryItem(QStringLiteral("access_key"), key);
-        url.setQuery(q);
-        out->url = url;
-        return true;
-    }
-
     if (error)
         *error = QStringLiteral("This provider cannot be validated automatically.");
     return false;
@@ -248,26 +209,7 @@ void judgeProbe(const app::Provider& provider, int status,
         return;
     }
 
-    if (v == QLatin1String("google_vision")) {
-        if (status == 200) {
-            *ok = true;
-            *message = QStringLiteral("Key accepted — Web Detection is reachable.");
-            return;
-        }
-        const QJsonObject root = QJsonDocument::fromJson(body).object();
-        const QString detail = root.value(QStringLiteral("error"))
-                                   .toObject()
-                                   .value(QStringLiteral("message"))
-                                   .toString();
-        *ok = false;
-        *message = detail.isEmpty()
-                       ? QStringLiteral("Google rejected the key (HTTP %1).")
-                             .arg(status)
-                       : detail;
-        return;
-    }
-
-    if (v == QLatin1String("saucenao")) {
+if (v == QLatin1String("saucenao")) {
         const QJsonObject root = QJsonDocument::fromJson(body).object();
         const QJsonObject header = root.value(QStringLiteral("header")).toObject();
         if (root.isEmpty()) {

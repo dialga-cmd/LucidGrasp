@@ -840,8 +840,8 @@ int runSelfTest()
                 || p.validator.isEmpty())
                 everyFielded = false;
         }
-        require(all.size() == 10,
-                "the registry should hold the 10 kept providers");
+        require(all.size() == 8,
+                "the registry should hold the 8 kept providers");
         require(ids.size() == all.size(), "provider ids should be unique");
         require(everyFielded,
                 "every provider needs an id, name, category and validator");

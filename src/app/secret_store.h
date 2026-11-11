@@ -70,7 +70,7 @@ public:
     QString iniPath() const { return iniPath_; }
 
     // Environment variable backing a provider, e.g.
-    // "google_vision" -> "LUCIDGRASP_KEY_GOOGLE_VISION".
+    // "saucenao" -> "LUCIDGRASP_KEY_SAUCENAO".
     static QString environmentVariable(const QString& providerId);
 
     // Never returns the full key: a fixed mask plus, for keys long enough to

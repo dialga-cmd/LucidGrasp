@@ -79,13 +79,6 @@ QByteArray downscaledImageBytes(const QString& path, int maxDim = 1024)
     return out;
 }
 
-// Same as above but base64-encoded, for providers that take an in-line image.
-QString downscaledImageBase64(const QString& path, int maxDim = 1024)
-{
-    const QByteArray bytes = downscaledImageBytes(path, maxDim);
-    return bytes.isEmpty() ? QString() : QString::fromLatin1(bytes.toBase64());
-}
-
 // A downscaled JPEG for SerpApi's Image API, which only accepts JPG/PNG/WebP
 // and caps uploads at 500 KB. Quality is stepped down, then the image itself,
 // until the encoded bytes fit.
@@ -281,129 +274,6 @@ QByteArray fetchBytes(QNetworkAccessManager& net, const QString& url)
 // --- Response parsers -------------------------------------------------------
 // Each parser appends either hits or a single per-provider error row.
 
-void parseGoogleVision(const QByteArray& payload, const QString& id,
-                       const QString& name,
-                       std::vector<app::SurfaceResult>& out)
-{
-    const QJsonObject root = QJsonDocument::fromJson(payload).object();
-    const QJsonArray responses =
-        root.value(QStringLiteral("responses")).toArray();
-    if (responses.isEmpty()) {
-        out.push_back(makeError(id, name, QStringLiteral("empty response")));
-        return;
-    }
-    const QJsonObject response = responses.first().toObject();
-    if (response.contains(QStringLiteral("error"))) {
-        const QString message = response.value(QStringLiteral("error"))
-                                    .toObject()
-                                    .value(QStringLiteral("message"))
-                                    .toString();
-        out.push_back(makeError(
-            id, name,
-            message.isEmpty() ? QStringLiteral("request failed") : message));
-        return;
-    }
-
-    const QJsonObject web =
-        response.value(QStringLiteral("webDetection")).toObject();
-    if (web.isEmpty()) {
-        out.push_back(makeError(id, name, QStringLiteral("no match")));
-        return;
-    }
-
-    auto add = [&](app::SurfaceResult result) {
-        result.provider = id;
-        result.providerName = name;
-        out.push_back(result);
-    };
-
-    // Pages where the image appears are the point of a surface scan, so show
-    // them before the raw image hits.
-    for (const QJsonValue& value :
-         web.value(QStringLiteral("pagesWithMatchingImages")).toArray()) {
-        const QJsonObject page = value.toObject();
-        app::SurfaceResult result;
-        result.title = page.value(QStringLiteral("pageTitle")).toString();
-        if (result.title.isEmpty())
-            result.title = QStringLiteral("page with match");
-        result.url = page.value(QStringLiteral("url")).toString();
-        const QJsonArray full =
-            page.value(QStringLiteral("fullMatchingImages")).toArray();
-        const QJsonArray partial =
-            page.value(QStringLiteral("partialMatchingImages")).toArray();
-        if (!full.isEmpty())
-            result.thumbnail = full.first()
-                                   .toObject()
-                                   .value(QStringLiteral("url"))
-                                   .toString();
-        else if (!partial.isEmpty())
-            result.thumbnail = partial.first()
-                                   .toObject()
-                                   .value(QStringLiteral("url"))
-                                   .toString();
-        result.similarity = -1.0;
-        add(result);
-    }
-
-    auto addImages = [&](const QJsonArray& images, const QString& kind) {
-        for (const QJsonValue& value : images) {
-            const QJsonObject image = value.toObject();
-            app::SurfaceResult result;
-            result.title = kind;
-            result.url = image.value(QStringLiteral("url")).toString();
-            // Image hits return the image itself; use it as the thumbnail too.
-            result.thumbnail = result.url;
-            result.similarity = -1.0;
-            add(result);
-        }
-    };
-    addImages(web.value(QStringLiteral("fullMatchingImages")).toArray(),
-              QStringLiteral("full match"));
-    addImages(web.value(QStringLiteral("partialMatchingImages")).toArray(),
-              QStringLiteral("partial match"));
-    addImages(web.value(QStringLiteral("visuallySimilarImages")).toArray(),
-              QStringLiteral("visually similar"));
-
-    // Entities and best-guess labels are text, not URLs. Point them at a Google
-    // search so the row is still useful, and keep Vision's score when present.
-    for (const QJsonValue& value :
-         web.value(QStringLiteral("webEntities")).toArray()) {
-        const QJsonObject entity = value.toObject();
-        app::SurfaceResult result;
-        result.title = entity.value(QStringLiteral("description")).toString();
-        if (result.title.isEmpty())
-            result.title = entity.value(QStringLiteral("entityType")).toString();
-        if (result.title.isEmpty())
-            continue;
-        result.url = entity.value(QStringLiteral("entityUrl")).toString();
-        if (result.url.isEmpty())
-            result.url = QStringLiteral("https://www.google.com/search?q=") +
-                         QString::fromLatin1(
-                             QUrl::toPercentEncoding(result.title));
-        result.similarity =
-            entity.contains(QStringLiteral("score"))
-                ? entity.value(QStringLiteral("score")).toDouble()
-                : -1.0;
-        result.extra = QStringLiteral("web entity");
-        add(result);
-    }
-
-    for (const QJsonValue& value :
-         web.value(QStringLiteral("bestGuessLabels")).toArray()) {
-        const QString label =
-            value.toObject().value(QStringLiteral("label")).toString();
-        if (label.isEmpty())
-            continue;
-        app::SurfaceResult result;
-        result.title = label;
-        result.url = QStringLiteral("https://www.google.com/search?q=") +
-                     QString::fromLatin1(QUrl::toPercentEncoding(label));
-        result.similarity = -1.0;
-        result.extra = QStringLiteral("best guess");
-        add(result);
-    }
-}
-
 void parseSauceNao(const QByteArray& payload, const QString& id,
                    const QString& name, std::vector<app::SurfaceResult>& out)
 {
@@ -589,7 +459,6 @@ std::vector<SurfaceResult> SurfaceScan::search(
     // into web results. The keyword-only rows in the registry are second-stage
     // and are not called here (see the plan, §5).
     const QStringList reverseProviders = {
-        QStringLiteral("google_vision"),
         QStringLiteral("saucenao"),
         QStringLiteral("trace_moe"),
         QStringLiteral("serpapi"),
@@ -725,54 +594,6 @@ std::vector<SurfaceResult> SurfaceScan::search(
                     return;
                 }
                 parseSerpApi(search.body, id, name, results);
-                return;
-            }
-
-            if (id == QLatin1String("google_vision")) {
-                const QString base64 = downscaledImageBase64(imagePath);
-                if (base64.isEmpty()) {
-                    fail(QStringLiteral("could not read the image"));
-                    return;
-                }
-
-                QJsonObject image{{QStringLiteral("content"), base64}};
-                QJsonObject feature{
-                    {QStringLiteral("type"), QStringLiteral("WEB_DETECTION")}};
-                QJsonArray features;
-                features.append(feature);
-                QJsonObject jsonRequest;
-                jsonRequest.insert(QStringLiteral("image"), image);
-                jsonRequest.insert(QStringLiteral("features"), features);
-                QJsonArray requests;
-                requests.append(jsonRequest);
-                QJsonObject root;
-                root.insert(QStringLiteral("requests"), requests);
-
-                QUrl url(QStringLiteral(
-                    "https://vision.googleapis.com/v1/images:annotate"));
-                QUrlQuery query;
-                query.addQueryItem(QStringLiteral("key"), key);
-                url.setQuery(query);
-
-                QNetworkRequest request(url);
-                request.setHeader(QNetworkRequest::ContentTypeHeader,
-                                  QStringLiteral("application/json"));
-                const HttpOutcome outcome = performRequest(
-                    net, request,
-                    QJsonDocument(root).toJson(QJsonDocument::Compact));
-                if (outcome.timedOut) {
-                    fail(QStringLiteral("timed out"));
-                    return;
-                }
-                if (!outcome.error.isEmpty()) {
-                    fail(outcome.error);
-                    return;
-                }
-                if (outcome.status >= 400) {
-                    failHttp(outcome);
-                    return;
-                }
-                parseGoogleVision(outcome.body, id, name, results);
                 return;
             }
 

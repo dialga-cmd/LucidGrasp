@@ -11,7 +11,7 @@ class SecretStore;
 
 // One web hit returned by a provider.
 struct SurfaceResult {
-    QString provider;   // the provider id, e.g. "google_vision"
+    QString provider;   // the provider id, e.g. "saucenao"
     QString providerName;  // display name
     QString title;
     QString url;

@@ -1882,9 +1882,8 @@ void MainWindow::updateActions() {
     // Surface mode: the button runs a web scan, so it only needs a chosen
     // query image and at least one enabled provider (trace_moe needs no key).
     static const QStringList kReverse = {
-        QStringLiteral("google_vision"), QStringLiteral("saucenao"),
-        QStringLiteral("trace_moe"),     QStringLiteral("serpapi"),
-        QStringLiteral("zenserp")};
+        QStringLiteral("saucenao"),    QStringLiteral("trace_moe"),
+        QStringLiteral("serpapi"),     QStringLiteral("zenserp")};
     bool anyProvider = false;
     for (const auto& p : app::providers()) {
       if (!kReverse.contains(p.id))
