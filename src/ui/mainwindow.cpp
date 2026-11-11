@@ -1300,9 +1300,13 @@ QString MainWindow::askForFile(const QString &title,
   QFileDialog dlg(this, title);
   dlg.setFileMode(QFileDialog::ExistingFile);
   dlg.setNameFilter(filter);
+  // Use the Qt built-in dialog so the fixed width is respected; native
+  // dialogs ignore resize() and open at the desktop's full width.
+  dlg.setOptions(QFileDialog::DontUseNativeDialog);
   applyThemeTo(&dlg);
   // A fresh file dialog expands to the parent's full width, which reads as
   // "really big". Cap it to a comfortable size; it stays resizable.
+  dlg.setMinimumWidth(560);
   dlg.resize(720, 440);
   return dlg.exec() == QDialog::Accepted ? dlg.selectedFiles().value(0)
                                          : QString();
@@ -1466,23 +1470,12 @@ void MainWindow::browseQuery() {
   if (indexing_ || searching_)
     return;
 
-  static const QString filter = [] {
-    QSet<QString> exts;
-    for (const QByteArray &f : QImageReader::supportedImageFormats())
-      exts.insert(QString::fromLatin1(f).toLower());
-    exts << QStringLiteral("png") << QStringLiteral("jpg")
-         << QStringLiteral("jpeg") << QStringLiteral("bmp")
-         << QStringLiteral("gif");
-
-    QStringList list(exts.cbegin(), exts.cend());
-    list.sort();
-
-    QString patterns;
-    for (const QString &e : list)
-      patterns += QStringLiteral(" *.") + e;
-
-    return QStringLiteral("Images (%1);;All files (*)").arg(patterns);
-  }();
+  // Use only the common image formats a reverse-image user would actually
+  // browse to.  QImageReader::supportedImageFormats() on a full desktop
+  // returns 40+ extensions (heif, kra, exr, …) and forces the "Files of type"
+  // combo to stretch the dialog to full screen width.
+  const QString filter =
+      QStringLiteral("Images (*.png *.jpg *.jpeg *.webp *.bmp *.gif);;All files (*)");
 
   const QString file =
       askForFile(QStringLiteral("Select query image"), filter);
