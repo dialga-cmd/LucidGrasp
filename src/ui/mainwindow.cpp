@@ -10,6 +10,7 @@
 #include <QCheckBox>
 #include <QCloseEvent>
 #include <QColor>
+#include <QCursor>
 #include <QDesktopServices>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -545,6 +546,10 @@ MainWindow::MainWindow(QWidget *parent)
       makeToolButton(QStringLiteral("themeToggleBtn"), QString());
   topBar->addWidget(themeToggleBtn_);
 
+  openBrowserBtn_ = makeToolButton(QStringLiteral("openBrowserBtn"),
+                                   QStringLiteral("Open in browser"));
+  topBar->addWidget(openBrowserBtn_);
+
   revealBtn_ = makeToolButton(QStringLiteral("revealBtn"),
                               QStringLiteral("Show in file manager"));
   topBar->addWidget(revealBtn_);
@@ -656,6 +661,27 @@ MainWindow::MainWindow(QWidget *parent)
   connect(searchBtn_, &QPushButton::clicked, this, &MainWindow::runSearchOrSurface);
   connect(results_, &QListWidget::itemDoubleClicked, this,
           &MainWindow::openResult);
+  connect(openBrowserBtn_, &QPushButton::clicked, this,
+          &MainWindow::openInBrowser);
+  // Single click on the image thumbnail opens a fullscreen view; clicking the
+  // text label just selects.
+  connect(results_, &QListWidget::itemClicked,
+          [this](QListWidgetItem *item) {
+            if (item->data(Qt::UserRole + 2).toInt() != 1)
+              return;
+            const QPoint clickPos = QCursor::pos();
+            const QPoint viewPos =
+                results_->viewport()->mapFromGlobal(clickPos);
+            const QRect itemRect = results_->visualItemRect(item);
+            if (!itemRect.contains(viewPos))
+              return;
+            const QSize iconSize = results_->iconSize();
+            const QPoint iconTopLeft(
+                itemRect.center().x() - iconSize.width() / 2,
+                itemRect.top() + 4);
+            if (QRect(iconTopLeft, iconSize).contains(viewPos))
+              viewFullscreen();
+          });
   connect(revealBtn_, &QPushButton::clicked, this, &MainWindow::revealResult);
   connect(trashBtn_, &QPushButton::clicked, this, &MainWindow::trashResult);
   connect(results_, &QListWidget::currentItemChanged, this,
@@ -1125,16 +1151,18 @@ void MainWindow::appendSurfaceBatch(
     const std::vector<app::SurfaceResult>& batch) {
   for (const auto& r : batch) {
     QString label;
+    QString tooltip;
     if (!r.error.isEmpty()) {
       label = r.providerName + QStringLiteral(" — ") + r.error;
     } else {
-      label = r.providerName + QStringLiteral(": ");
-      if (!r.title.isEmpty())
-        label += r.title;
-      if (r.similarity >= 0.0)
-        label += QStringLiteral(" (%1%)").arg(int(r.similarity * 100.0));
+      // Show only the provider name as the visible label; the full title
+      // lives in the tooltip so the grid stays clean.
+      label = r.providerName;
       if (!r.extra.isEmpty())
-        label += QStringLiteral("\n") + r.extra;
+        label += QStringLiteral("  ") + r.extra;
+      tooltip = r.title.isEmpty() ? r.providerName : r.title;
+      if (!r.url.isEmpty())
+        tooltip += QStringLiteral("\n") + r.url;
     }
 
     QPixmap thumb;
@@ -1151,10 +1179,8 @@ void MainWindow::appendSurfaceBatch(
     item->setData(Qt::UserRole, r.url);
     item->setData(Qt::UserRole + 1, r.provider);
     item->setData(Qt::UserRole + 2, QVariant(1));  // sentinel: web result
-    if (!r.url.isEmpty())
-      item->setToolTip(r.url + (r.thumbnail.isEmpty() ? QString()
-                                                     : QStringLiteral("\n") +
-                                                         r.thumbnail));
+    if (!tooltip.isEmpty())
+      item->setToolTip(tooltip);
     item->setSizeHint({170, 200});
     results_->addItem(item);
   }
@@ -1744,9 +1770,61 @@ void MainWindow::updateResultActions() {
   // Reveal-in-file-manager and trash only make sense for local index results,
   // not for web hits returned by a surface scan.
   const bool isWeb = haveResult && item->data(Qt::UserRole + 2).toInt() == 1;
+  const bool hasUrl = isWeb &&
+                      !item->data(Qt::UserRole).toString().isEmpty();
+  openBrowserBtn_->setEnabled(hasUrl);
   revealBtn_->setEnabled(haveResult && !isWeb);
   trashBtn_->setEnabled(haveResult && !isWeb);
 }
+
+void MainWindow::openInBrowser() {
+  QListWidgetItem *item = currentResult();
+  if (!item || item->data(Qt::UserRole + 2).toInt() != 1)
+    return;
+  const QString url = item->data(Qt::UserRole).toString();
+  if (url.isEmpty())
+    return;
+  if (!QDesktopServices::openUrl(QUrl(url)))
+    statusBar()->showMessage(QStringLiteral("Could not open the browser"),
+                              4000);
+}
+
+void MainWindow::viewFullscreen() {
+  QListWidgetItem *item = currentResult();
+  if (!item)
+    return;
+  // The item's icon holds the worker-thread thumbnail; fetch it at a large
+  // size for the fullscreen view.
+  const QPixmap pm = item->icon().pixmap({2048, 2048});
+  if (pm.isNull())
+    return;
+
+  auto *dialog = new QDialog(nullptr);
+  dialog->setWindowTitle(QStringLiteral("LucidGrasp — result"));
+  dialog->setWindowFlags(Qt::Window | Qt::FramelessWindowHint);
+  auto *layout = new QVBoxLayout(dialog);
+  layout->setContentsMargins(0, 0, 0, 0);
+
+  auto *label = new QLabel(dialog);
+  label->setObjectName(QStringLiteral("fullScreenImage"));
+  label->setScaledContents(true);
+  label->setAlignment(Qt::AlignCenter);
+  label->setPixmap(pm);
+  layout->addWidget(label);
+
+  auto *closeRow = new QHBoxLayout;
+  auto *closeBtn = new QPushButton(QStringLiteral("Close (Esc)"), dialog);
+  closeBtn->setObjectName(QStringLiteral("fullScreenClose"));
+  closeRow->addStretch();
+  closeRow->addWidget(closeBtn);
+  closeRow->addStretch();
+  layout->addLayout(closeRow);
+
+  QObject::connect(closeBtn, &QPushButton::clicked, dialog, &QDialog::accept);
+  dialog->showFullScreen();
+}
+
+
 
 void MainWindow::setBusy(bool busy) {
   browseLibBtn_->setEnabled(!busy);

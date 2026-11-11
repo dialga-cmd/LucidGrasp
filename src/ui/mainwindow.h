@@ -52,6 +52,8 @@ private slots:
     void startSearch();
     void stopSearch();
     void openResult(QListWidgetItem* item);
+    void openInBrowser();
+    void viewFullscreen();
     void revealResult();
     void trashResult();
     void toggleTheme();
@@ -123,6 +125,7 @@ private:
     QLabel* stats_ = nullptr;
     QListWidget* results_ = nullptr;
     QPushButton* themeToggleBtn_ = nullptr;
+    QPushButton* openBrowserBtn_ = nullptr;
     QPushButton* revealBtn_ = nullptr;
     QPushButton* trashBtn_ = nullptr;
     QSpinBox* thresholdSpin_ = nullptr;
