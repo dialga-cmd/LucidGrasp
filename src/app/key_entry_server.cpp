@@ -207,12 +207,6 @@ bool buildProbe(const app::Provider& provider, const QString& key, Probe* out,
         return true;
     }
 
-    if (v == QLatin1String("outscraper")) {
-        out->url = QUrl(QStringLiteral("https://api.app.outscraper.com/profile"));
-        out->headers.append({QByteArrayLiteral("X-API-KEY"), key.toUtf8()});
-        return true;
-    }
-
     if (v == QLatin1String("serpstack")) {
         QUrl url(QStringLiteral("https://api.serpstack.com/account"));
         QUrlQuery q;

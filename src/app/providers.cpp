@@ -166,23 +166,6 @@ const QVector<Provider>& providers()
             },
         },
         {
-            QStringLiteral("outscraper"),
-            QStringLiteral("Outscraper"),
-            QStringLiteral("Outscraper"),
-            QStringLiteral("Keyword / general"),
-            QStringLiteral("Google Images by text query. Second stage only."),
-            QStringLiteral("https://outscraper.com/"),
-            true,
-            QStringLiteral("outscraper"),
-            {
-                QStringLiteral("Go to outscraper.com and click Sign up."),
-                QStringLiteral("Register with your email, confirm it, then log in."),
-                QStringLiteral("Open the Dashboard and go to the API section."),
-                QStringLiteral("Copy your API key. The free tier gives 500 records per service every 30 days."),
-                QStringLiteral("Paste it here and click Validate."),
-            },
-        },
-        {
             QStringLiteral("serpstack"),
             QStringLiteral("Serpstack"),
             QStringLiteral("Serpstack"),

@@ -139,7 +139,6 @@ per request, so per-1K-image and per-1K-request figures differ.
 | **ScraperAPI** | General scraping + Google Images (no Lens/reverse) | `api_key` | **1,000/mo** (+5,000 first 7 days) | $49/mo 100,000 credits | Keyword-bridge only (no Lens) |
 | **Scrape.do** | SERP API (no reverse) | API key | **1,000 credits/mo** | ~$1.16/1K | Keyword-bridge only |
 | **ZenRows** | SERP / general scraping (no reverse) | API key | **5,000 credits/mo** | $16/mo 45K | Keyword-bridge only |
-| **Outscraper** | Google Images (no-code, text) | API key | **500 records/service per rolling 30 days** | $3/1K records | Keyword-bridge only |
 | **Serpstack** | Google SERP | API key | **100 requests/mo** | $29.99/mo | Keyword-bridge only |
 
 Providers dropped by the recurring-credit rule (one-time trial only) and the gated
@@ -171,7 +170,6 @@ research time — verify exact paths and auth before coding.
 | **ScraperAPI** | Keyword/general | `GET api.scraperapi.com/?api_key=&url=<Google Images URL>&render=true` → HTML | Image→keywords, then scrape | 1,000/mo |
 | **Scrape.do** | Keyword/general | `GET api.scrape.do/?token=&url=` → SERP | keyword SERP | 1,000/mo |
 | **ZenRows** | Keyword/general | `GET /?apikey=&url=&mode=auto` → HTML/JSON | keyword SERP | 5,000/mo |
-| **Outscraper** | Keyword only | `GET api.app.outscraper.com/google-images?query=` (`X-API-KEY`) | Image→keywords, then query | 500/service per 30 days |
 | **Serpstack** | Keyword/general | `GET ?access_key=&query=` → JSON | keyword SERP | 100/mo |
 
 ### Reading the matrix
@@ -196,7 +194,7 @@ research time — verify exact paths and auth before coding.
 3. **Crawler path:** Yandex CBIR, explicitly consented, verified locally with
    `CvMatcher` / pHash — never the sole discovery source.
 4. **Keyword-bridge providers (recurring credits):** SerpApi, Zenserp, HasData,
-   ScraperAPI, Scrape.do, ZenRows, Outscraper, Serpstack — used only after the
+   ScraperAPI, Scrape.do, ZenRows, Serpstack — used only after the
    image→keyword bridge.
 5. **Excluded:** all one-time-trial-only and gated platforms (§9.2), and everything in
    §2.
@@ -230,7 +228,7 @@ research time — verify exact paths and auth before coding.
   both are acceptable for a desktop client's BYO-key use.
 - Yandex: confirm CBIR still works through a stealth/residential scraping vendor and
   current credit cost at build time; the crawler stays verifier-only.
-- Kept vendors (SerpApi, Zenserp, HasData, ScraperAPI, Scrape.do, ZenRows, Outscraper,
+- Kept vendors (SerpApi, Zenserp, HasData, ScraperAPI, Scrape.do, ZenRows,
   Serpstack): re-check free tiers and prices at implementation time (they move), and read
   each vendor's ToS on desktop / "bring-your-own-key" redistribution.
 - Reconsider if the recurring-credit rule is relaxed: the excluded one-time-trial
@@ -244,7 +242,7 @@ research time — verify exact paths and auth before coding.
 ## 9. How to obtain each API — (verified Oct 2026)
 
 Rule: self-serve from the vendor's website **and** recurring (monthly / daily / hourly)
-credits. 11 platforms qualify.
+credits. 10 platforms qualify.
 
 ### 9.1 Kept — self-serve with recurring credits (11)
 
@@ -259,7 +257,6 @@ credits. 11 platforms qualify.
 | ScraperAPI | `scraperapi.com` → sign up | 1,000 credits/mo (+5,000 first 7 days) | No |
 | Scrape.do | `scrape.do` → sign up | 1,000 credits/mo | No |
 | ZenRows | `zenrows.com` → sign up | 5,000 credits/mo | No |
-| Outscraper | `outscraper.com` → sign up | 500 records/service per rolling 30 days | No |
 | Serpstack | `serpstack.com` → sign up | 100 requests/mo | No |
 
 ### 9.2 Excluded — one-time trial only, or gated (not used)
@@ -309,7 +306,7 @@ Built:
 - `SecretStore` — layered key storage, precedence `environment > OS keychain >
   owner-only INI` (`0600`), plus a mask that shows only the tail. The browser never
   receives a key, only the mask.
-- `providers.cpp` — the eleven kept providers (§9.1) as pure data, each with display
+- `providers.cpp` — the ten kept providers (§9.1) as pure data, each with display
   name, category, description, signup URL and a step-by-step signup walkthrough.
 - `KeyEntryServer` — loopback HTTP server on an OS-assigned port. Per-session random
   token, `Host` check, `Origin` check, length-independent token compare. Endpoints:
@@ -358,7 +355,6 @@ Validation probes (one-shot, server-side in C++):
 | ScraperAPI | `/account` |
 | Scrape.do | `/info` |
 | ZenRows | `v1/?apikey=&url=` |
-| Outscraper | `X-API-KEY` → `/profile` |
 | Serpstack | `/account` |
 
 Not built:
