@@ -1146,6 +1146,10 @@ void MainWindow::appendSurfaceBatch(
     // Build a card widget: image on top, source label middle, button bottom.
     auto *card = new QWidget;
     card->setObjectName(QStringLiteral("surfaceCard"));
+    // QListWidget in IconMode collapses cells whose widget has a 0×0
+    // sizeHint, so pin the card to the grid cell size explicitly.
+    card->setFixedSize(results_->gridSize().width() - 16,
+                       results_->gridSize().height() - 16);
     auto *lay = new QVBoxLayout(card);
     lay->setContentsMargins(8, 8, 8, 8);
     lay->setSpacing(4);
