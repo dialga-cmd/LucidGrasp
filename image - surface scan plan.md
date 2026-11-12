@@ -1,10 +1,9 @@
 # Image — Surface Scan Plan
 
-Last updated: 2026-11-06
-Status: research + design complete; **key-entry platform and multi-provider
-reverse-image search implemented** on `feature/surface-search` (storage,
-validation, local server, page, provider calls). The image→keyword bridge is
-not written yet. See §10.
+Last updated: 2026-11-12
+Status: research and design complete. The key-entry platform and
+multi-provider reverse-image search shipped in **1.3.0** and are on `main`.
+The image→keyword bridge is not written yet. See §10.
 
 Supersedes the earlier `lists.md` (image-hosting + keyword-search list). This file is
 scoped to the **surface scan** feature only: given an image the user has selected, find
@@ -205,19 +204,15 @@ research time — verify exact paths and auth before coding.
 
 ## 8. Open questions / to verify
 
-  and whether a no-billing key's 1,000/month is enough; confirm current GCP quota defaults.
-- SauceNAO / trace.moe: confirm current key issuance and per-account rate limits, and that
-  both are acceptable for a desktop client's BYO-key use.
-- Yandex: confirm CBIR still works through a stealth/residential scraping vendor and
-  current credit cost at build time; the crawler stays verifier-only.
-- Kept vendors (SerpApi, Zenserp, HasData, ScraperAPI, Scrape.do, ZenRows):
-  re-check free tiers and prices at implementation time (they move), and read
-  each vendor's ToS on desktop / "bring-your-own-key" redistribution.
-- Reconsider if the recurring-credit rule is relaxed: the excluded one-time-trial
-  providers in §9.2 (Serper.dev, ScrapingBee, Scrapingdog, SearchApi.io, Oxylabs, Apify,
-  ScrapeBadger, DataForSEO, Zyte, WebScrapingAPI, Serpent, Scrapfly, Decodo) could return.
-- Decide the final ordered provider list and fallback chain (official → reverse wrappers →
-  keyword bridge → crawler).
+- Re-check free tiers, prices and provider terms at implementation time; they
+  move often. The recurring-credit rule in §9 is the source of truth.
+- Yandex: confirm whether the CBIR path is still reachable through a compliant
+  scraping vendor and whether the ToS exposure is acceptable. The crawler stays
+  verifier-only.
+- Reconsider the excluded one-time-trial providers in §9.2 only if the
+  recurring-credit rule is relaxed.
+- Review the ordered provider list and fallback chain as the keyword bridge and
+  crawler are built (official → reverse wrappers → keyword bridge → crawler).
 
 ---
 
@@ -276,10 +271,10 @@ balance, not a monthly/daily/hourly reset), or because they are sales/KYC-gated:
 
 ---
 
-## 10. Implementation status (2026-11-06)
+## 10. Implementation status (2026-11-12)
 
-The **key-entry platform** and the **reverse-image search** are implemented on
-`feature/surface-search`.
+The **key-entry platform** and the **reverse-image search** shipped in 1.3.0
+and are on `main`.
 
 Built:
 
@@ -304,10 +299,10 @@ Built:
     `author_name`, `data.ext_urls`, header thumbnail. Handles status `< 0` and
     `100` (rate limit).
   - **trace.moe** — raw image body POST; `anilist`, `filename`,
-    `image`, `similarity` (0–1), episode/timestamps. Frames below 0.99 similarity
-    are dropped because the API's cosine distance always returns "closest"
-    results even for non-anime images (scoring 0.97–0.99); real anime frames
-    reliably score ≥ 0.99.
+    `image`, `similarity` (0–1), episode/timestamps. Frames below 0.90
+    similarity are dropped using the API's documented confidence cut-off,
+    because trace.moe always returns the closest frame even for non-anime
+    images.
   - **SerpApi** — uploads the image to `/image` (JPEG, ≤ 480 KB) then calls
     `engine=google_lens&image_id=…`; reads `exact_matches` / `visual_matches`.
   - **Zenserp** — reported as unsupported for local files with a clear message,

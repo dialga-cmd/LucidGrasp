@@ -1,6 +1,6 @@
 # LucidGrasp Disclaimer of Warranties and Limitation of Liability
 
-Effective: October 2026
+Effective: November 2026
 
 ## 1. "As is" disclaimer
 
@@ -41,10 +41,13 @@ Nothing in the Software, its documentation, or its output constitutes legal,
 medical, security, or regulatory advice, a compliance review, or a
 certification of compliance with any law or framework.
 
-## 5. Third-party components
+## 5. Third-party components and services
 
-The Software links to third-party components, including Qt6 and OpenCV, which
-are distributed under their own licenses and carry their own disclaimers.
+The Software links to third-party components, including Qt6 and OpenCV, and can
+send Surface Scan requests to third-party services you enable. Those components
+and services are distributed under their own licenses, terms and privacy
+policies, and carry their own disclaimers. The project does not warrant their
+availability, accuracy or results.
 
 ## 6. This document
 

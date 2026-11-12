@@ -1,6 +1,6 @@
 # LucidGrasp Terms of Use
 
-Effective: October 2026
+Effective: November 2026
 
 These terms govern your use of the LucidGrasp application ("the Software"), its
 source code, and its releases. By downloading, installing, using, or
@@ -37,7 +37,10 @@ code, the MIT License controls.
 Unless you turn automatic checks off, the Software checks GitHub, on launch,
 for a newer release announcement and shows a dialog when one exists. This is
 described in full in [PRIVACY.md](PRIVACY.md). Nothing is downloaded or
-installed automatically.
+installed automatically. The optional curl installers published with each
+release are separate scripts that you run yourself; they download release
+assets from GitHub and may ask your system package manager to install missing
+runtime dependencies.
 
 ## 4. Acceptable use
 
@@ -53,10 +56,17 @@ limitation of liability are in [DISCLAIMER.md](DISCLAIMER.md).
 
 ## 6. Third-party services
 
-The update check talks to the GitHub API. Opening the Help menu links uses
-your default web browser or mail application. GitHub's own terms and privacy
-statement — and the policies of your mail provider and browser — apply to
-those interactions and are outside this project's control.
+The update check talks to the GitHub API. When you start a Surface Scan, the
+image you select and the API key you configured are sent directly to the
+third-party providers you enable. Providers currently include SauceNAO,
+trace.moe, SerpApi, Zenserp, HasData, ScraperAPI, Scrape.do and ZenRows, and the
+list may change as the feature evolves. Each provider's terms of service,
+quotas, acceptable-use rules and privacy policy apply to those requests, and
+you are responsible for complying with them and for any charges your account
+incurs. The project does not control and is not responsible for those services.
+Opening the Help menu links uses your default web browser or mail application;
+the terms and policies of GitHub and your mail provider apply to those
+interactions as well.
 
 ## 7. International use and export
 

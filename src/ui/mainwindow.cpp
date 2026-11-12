@@ -65,22 +65,26 @@ constexpr qreal kPi = 3.14159265358979323846;
 const char *kPrivacyPolicyText = R"PRIVACY(
 LucidGrasp Privacy Policy
 
-Last reviewed: October 2026
+Last reviewed: November 2026
 
 LucidGrasp is designed so that your work stays on your machine. Your library,
-your searches and your settings are never collected, uploaded or sold. This
-policy states exactly what the application does with your data.
+your local searches and your settings are never collected, uploaded or sold.
+The only network features are the update check and the opt-in Surface Scan you
+start yourself. This policy states exactly what the application does with your
+data.
 
 DATA CONTROLLER
 The data controller is the project maintainer, reachable at
-adityaraj1234@duck.com for all privacy requests. The project is a free,
-open-source effort that processes no personal data on its own behalf.
+adityaraj1234@duck.com for all privacy requests. The project does not operate
+a server and receives no data from the application. Update checks go to
+GitHub, and Surface Scan requests go directly to the provider you enable.
 
 DATA THAT STAYS ON YOUR COMPUTER
 
 Indexing and matching read image files only from folders you choose. Every
-similarity comparison is computed on your own machine and no image data ever
-leaves it.
+similarity comparison is computed on your own machine, and no image data
+leaves your machine during indexing or local search. Surface Scan sends only
+the query image you choose, and only when you run it.
 
 The search index is cached to your own disk in your system's standard
 per-user data directory (for example ~/.local/share/LucidGrasp/indexes/ on
@@ -91,7 +95,12 @@ Preferences such as whether automatic update checks are enabled and which
 release version you are currently ignoring are stored in a per-user INI file
 in your system's standard configuration directory.
 
-THE ONE TIME DATA LEAVES YOUR COMPUTER
+Surface Scan keys are stored in your OS keychain when one is available, with
+an owner-only providers.ini fallback, or in an environment variable you set.
+Keys are sent only to the provider they belong to, when you validate the key
+or run a scan.
+
+WHEN DATA LEAVES YOUR COMPUTER
 
 Update checks. On launch, unless you have turned automatic checks off in the
 Updates menu, LucidGrasp makes a single HTTPS request to the GitHub API asking
@@ -106,6 +115,27 @@ security fixes and new releases, and it can be switched off entirely in the
 Updates menu. If a newer release exists you are shown a dialog with a link;
 nothing is downloaded or installed unless you choose to do it yourself.
 
+Surface Scan (only when you start it). Surface Scan is opt-in. When you choose
+Internet > Surface Search... and press "Search the web", LucidGrasp sends the
+query image you selected to each reverse-image provider you have enabled.
+SauceNAO and trace.moe receive a downscaled copy of the image. SerpApi receives
+a downscaled copy, uploads it to its own image service and runs a Google Lens
+lookup. Zenserp is only offered for a publicly reachable image URL; local files
+are reported as unsupported, so no local image is sent to Zenserp. The request
+also carries the provider API key you configured, an identifying
+LucidGrasp/<version> user agent, and the network metadata any HTTPS request
+carries, including your IP address. The provider processes the image and
+returns results under its own terms, quotas and privacy policy, and LucidGrasp
+then downloads result thumbnails from the addresses it returned, so those hosts
+also see your request. The project does not receive the image, the key or the
+results. HasData, ScraperAPI, Scrape.do and ZenRows currently receive only the
+key-validation request; they are not used for an image search until the
+image-to-keyword stage is added. Pressing "Validate" sends the key to that
+provider's validation endpoint. LucidGrasp keeps no copy of a surface-scan
+request or its results beyond the current session, and keys remain on your
+machine until you remove them; providers retain request logs and results under
+their own policies.
+
 Help menu links. "Report an Issue", "Request a Feature", "View on GitHub" and
 "Contact the Developer" open whichever external service they name (GitHub or
 your mail application) using your normal default apps. Those services have
@@ -119,9 +149,10 @@ of any kind, and no sale or sharing of personal data: the "sale" and
 "sharing" definitions under the CCPA/CPRA and comparable US state privacy
 laws never apply, so there is nothing to opt out of.
 
-LucidGrasp does not inspect, upload or transmit your images, folders or search
+LucidGrasp does not inspect or transmit your images, folders or local search
 queries to anyone, and no user data is used to train any machine-learning
-model.
+model. The only exception is the image you explicitly submit to Surface Scan,
+which goes only to the providers you enable.
 
 CHILDREN
 The Software is not directed at children. Consistent with COPPA (US) and the
@@ -146,7 +177,7 @@ Questions about this policy: adityaraj1234@duck.com.
 const char *kTermsText = R"TERMS(
 LucidGrasp Terms of Use
 
-Effective: October 2026
+Effective: November 2026
 
 These terms govern your use of the LucidGrasp application, its source code,
 and its releases. By downloading, installing, using, or redistributing the
@@ -171,7 +202,10 @@ UPDATES
 
 Unless automatic checks are turned off, the Software checks GitHub on launch
 for a newer release announcement and shows a dialog when one exists (see the
-Privacy Policy). Nothing is downloaded or installed automatically.
+Privacy Policy). Nothing is downloaded or installed automatically. The optional
+curl installers published with each release are separate scripts that you run
+yourself; they download release assets from GitHub and may ask your system
+package manager to install missing runtime dependencies.
 
 ACCEPTABLE USE AND LIABILITY
 
@@ -183,9 +217,16 @@ described in DISCLAIMER.md.
 
 THIRD-PARTY SERVICES
 
-The update check talks to the GitHub API; Help menu links use your default
-browser or mail application. Those services' own terms and policies apply to
-those interactions.
+The update check talks to the GitHub API. When you start a Surface Scan, the
+image you select and the API key you configured are sent directly to the
+third-party providers you enable. Providers currently include SauceNAO,
+trace.moe, SerpApi, Zenserp, HasData, ScraperAPI, Scrape.do and ZenRows, and the
+list may change as the feature evolves. Each provider's terms, quotas,
+acceptable-use rules and privacy policy apply to those requests, and you are
+responsible for complying with them and for any charges your account incurs.
+The project does not control and is not responsible for those services. Help
+menu links use your default browser or mail application; the terms and policies
+of GitHub and your mail provider apply to those interactions as well.
 
 INTERNATIONAL USE AND EXPORT
 
@@ -209,7 +250,7 @@ Questions: adityaraj1234@duck.com.
 const char *kDisclaimerText = R"DISCLAIMER(
 LucidGrasp Disclaimer of Warranties and Limitation of Liability
 
-Effective: October 2026
+Effective: November 2026
 
 AS-IS DISCLAIMER
 THE SOFTWARE IS PROVIDED "AS IS" AND "AS AVAILABLE", WITHOUT WARRANTY OF ANY
@@ -239,6 +280,13 @@ OF PROFITS, OR BUSINESS INTERRUPTION.
 The software is free; nothing is sold; these limitations are a fundamental
 basis of its availability.
 
+THIRD-PARTY COMPONENTS AND SERVICES
+The Software links to third-party components, including Qt6 and OpenCV, and can
+send Surface Scan requests to third-party services you enable. Those components
+and services are distributed under their own licenses, terms and privacy
+policies, and carry their own disclaimers. The project does not warrant their
+availability, accuracy or results.
+
 NOT ADVICE
 Nothing in the Software, its documentation, or its output constitutes legal,
 medical, security, or regulatory advice, a compliance review, or a
@@ -248,7 +296,7 @@ certification of compliance with any law or framework.
 const char *kAcceptableUseText = R"USE(
 LucidGrasp Acceptable Use Policy
 
-Effective: October 2026
+Effective: November 2026
 
 LucidGrasp indexes folders on your own machine and finds visually similar
 images. You must use it within these limits.
@@ -263,6 +311,16 @@ AUTHORIZED SYSTEMS ONLY
 Index only files and systems you own or are authorized by the owner to
 access. Do not use the Software against systems, networks, or data you have
 no right to read.
+
+SURFACE SCAN AND THIRD-PARTY PROVIDERS
+Surface Scan sends the image you select, and any API key you configured,
+directly to the third-party providers you enable. Use it only with images you
+have the right to submit, and only in line with each provider's terms, quotas,
+acceptable-use policy and privacy policy. You may not use Surface Scan to
+stalk, harass, dox, or monitor anyone, to evade a provider's authentication or
+quota, or to submit content that is unlawful or that you are not authorized to
+share. API keys you add remain yours; keep them confidential and do not share
+accounts in breach of a provider's terms.
 
 WHAT YOU MAY NOT DO
 You may not use the Software to plan, facilitate, or commit any unlawful act;

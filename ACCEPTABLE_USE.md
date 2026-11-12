@@ -1,6 +1,6 @@
 # LucidGrasp Acceptable Use Policy
 
-Effective: October 2026
+Effective: November 2026
 
 LucidGrasp indexes folders on your own machine and finds visually similar
 images. It can search whatever folders you point it at, up to a whole
@@ -23,7 +23,19 @@ Index only files and systems you own or are authorized by the owner to
 access. Do not use the Software against systems, networks, or data you have no
 right to read.
 
-## 3. What you may not do
+## 3. Surface Scan and third-party providers
+
+Surface Scan sends the image you select, and any API key you configured,
+directly to the third-party providers you enable. Use it only with images you
+have the right to submit, and only in line with each provider's terms, quotas,
+acceptable-use policy and privacy policy.
+
+You may not use Surface Scan to stalk, harass, dox, or monitor anyone, to evade
+a provider's authentication or quota, or to submit content that is unlawful or
+that you are not authorized to share. API keys you add remain yours; keep them
+confidential and do not share accounts in breach of a provider's terms.
+
+## 4. What you may not do
 
 You may not use the Software to:
 
@@ -37,14 +49,14 @@ You may not use the Software to:
   reselling LucidGrasp, claiming endorsement that does not exist, or using the
   project name to imply provenance that is not genuine.
 
-## 4. Redistribution
+## 5. Redistribution
 
 The source code and binaries may be redistributed under the [MIT License](LICENSE).
 Redistributors must keep the license text and copyright notice, mark their
 modifications clearly, and must not represent modified copies as the official
 project.
 
-## 5. Enforcement
+## 6. Enforcement
 
 If you become aware of a violation of this policy, or a vulnerability that
 could enable one, report it: security matters go through [SECURITY.md](SECURITY.md),

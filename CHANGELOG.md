@@ -3,6 +3,19 @@
 All notable changes are listed here in reverse chronological order. History
 before 1.2.4 is on the [GitHub Releases](https://github.com/dialga-cmd/LucidGrasp/releases) page.
 
+## [Unreleased]
+
+- Added `curl` installers: `install.sh` for Linux and macOS, and `install.ps1`
+  for Windows. They resolve the latest release, verify published SHA-256
+  checksums, install missing runtime dependencies, and support uninstall and
+  dry-run modes. Both scripts are published as release assets.
+- Release workflows now publish a `.sha256` file for every platform asset, and
+  CI validates the installer scripts before a release can be built.
+- The README documents curl installation, installer options, per-platform
+  runtime dependencies, manual dependency commands, and the Linux OpenCV ABI
+  caveat. The privacy, terms, acceptable-use, disclaimer, security and support
+  pages were updated for Surface Scan and the new installers.
+
 ## [1.3.0] - 2026-11-11
 
 - **Surface Scan is here: search the web with an image.** Pick a local image

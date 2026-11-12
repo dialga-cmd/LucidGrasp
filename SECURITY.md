@@ -34,5 +34,13 @@ and are not public until the advisory is published after a fix ships.
 
 This policy covers LucidGrasp itself: the application source in this
 repository, the build configuration, and the installers and packages it
-produces. Third-party dependencies (Qt6, OpenCV) are governed by their own
-security processes.
+produces. The release installers (`packaging/install.sh` and
+`packaging/install.ps1`) download only this repository's GitHub release assets,
+verify the published SHA-256 checksum before running anything, and hand
+dependency installation to the system package manager. Surface Scan API keys
+are stored through the application's secret store and are sent only to the
+provider they belong to. Report supply-chain or credential-handling concerns
+through the private channel above.
+
+Third-party dependencies (Qt6, OpenCV) and the Surface Scan providers are
+governed by their own security processes.

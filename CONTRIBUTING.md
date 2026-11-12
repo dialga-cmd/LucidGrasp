@@ -19,13 +19,16 @@ make
 
 The Windows build process (MSVC toolset selection, Qt and OpenCV setup,
 `windeployqt`) is documented in the [README](README.md#building-from-source-windows).
+The macOS build uses Homebrew Qt and OpenCV and is documented in the
+[README](README.md#building-from-source-macos).
 
 ## Verifying a change
 
 Run the self-test before and after your change. It builds a synthetic image
 corpus, indexes it, and verifies that edited and rescaled copies rank above
 unrelated distractors, along with the update checker's version and payload
-handling. It needs no network and no display:
+handling and the surface-scan key store and loopback request handling. It needs
+no network and no display:
 
 ```bash
 ./LucidGrasp --selftest
@@ -44,6 +47,20 @@ rather than leaving behavior untested.
 - User-visible strings are wrapped in `tr()`.
 - Keep changes focused. A pull request should do one thing and describe it.
 - No network access in the self-test; it must run headless.
+- Update the documentation when user-visible behavior changes: `README.md` for
+  features, install steps, and dependencies; `CHANGELOG.md` for the change
+  itself; and the legal or privacy pages when a data flow changes.
+
+## Packaging and installers
+
+Release builds and publish jobs live in `.github/workflows/`. The curl
+installers live in `packaging/install.sh` (Linux and macOS) and
+`packaging/install.ps1` (Windows).
+
+If you change runtime dependencies, update both installer scripts and the
+dependency tables in the README. CI runs `sh -n`, ShellCheck, and a PowerShell
+parser over the scripts on every pull request, and the release jobs publish the
+scripts plus a `.sha256` file for every platform asset.
 
 ## Proposing changes
 

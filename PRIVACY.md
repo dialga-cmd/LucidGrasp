@@ -1,11 +1,12 @@
 # LucidGrasp Privacy Policy
 
-Last reviewed: October 2026
+Last reviewed: November 2026
 
 LucidGrasp is designed so that your work stays on your machine. Your library,
-your searches and your settings are never collected, uploaded or sold. This
-document states exactly what the application does with your data so every
-claim is easy to check against the source code.
+your local searches and your settings are never collected, uploaded or sold.
+The only network features are the update check and the opt-in Surface Scan you
+start yourself. This document states exactly what the application does with
+your data so every claim is easy to check against the source code.
 
 The same text is available inside the application at **Help → Privacy
 Policy...**.
@@ -15,19 +16,22 @@ Policy...**.
 The data controller for the processing described in this policy is the
 project maintainer, reachable at
 [adityaraj1234@duck.com](mailto:adityaraj1234@duck.com),
-for all privacy requests. The project is a small, free, open-source effort; it
-processes no personal data on its own behalf. The single processing activity
-described below ("update checks") is limited to delivering the software to
-people who choose to install it.
+for all privacy requests. The project is a small, free, open-source effort. It
+does not operate a server and receives no data from the application. Update
+checks go to GitHub, and Surface Scan requests go directly from your machine to
+the provider you enable; neither passes through the maintainer. The processing
+activities described below are limited to delivering the software, notifying
+you about releases, and carrying out a surface scan you explicitly start.
 
 ## Data that stays on your computer
 
 ### Indexing and searching
 
 Indexing and matching read image files only from folders you choose. Every
-similarity comparison is computed on your own machine, and no image data ever
-leaves it. The application does not inspect, upload or transmit your images,
-folders or search queries to anyone.
+similarity comparison is computed on your own machine, and no image data leaves
+your machine during indexing or local search. Surface Scan is a separate,
+opt-in feature; it sends only the query image you choose, and only when you run
+it.
 
 ### Local cache
 
@@ -43,7 +47,20 @@ release version you are currently ignoring are stored in a per-user INI file
 in your system's standard configuration directory. Deleting that file resets
 those preferences.
 
-## The one time data leaves your computer
+### Surface Scan API keys
+
+Surface Scan keys are stored in your operating system's keychain when one is
+available. If no keychain is available, they are stored in an owner-only
+`providers.ini` file in your per-user configuration directory, readable and
+writable only by your account. You can also supply a key through an environment
+variable. Keys are never sent to the project; they go only to the provider they
+belong to, when you validate the key or run a scan that uses it. Removing a key
+from the setup page deletes the stored copy.
+
+## When data leaves your computer
+
+The application has two network features: the update check, and the Surface
+Scan you start yourself. Nothing else is transmitted.
 
 ### Update checks
 
@@ -58,7 +75,7 @@ HTTP headers your browser or this application sends. GitHub Inc. (part of
 Microsoft) is a company based in the United States; the request is therefore
 an international transmission of technical connection data to the United
 States, and GitHub's own [privacy statement](https://docs.github.com/en/site-policy/privacy-policies/github-privacy-statement)
-applies to it. No other vendor receives any data from the application.
+applies to it. No other vendor receives data from the update check.
 
 **Lawful basis (GDPR Article 6):** this request is necessary for the
 legitimate interest of making sure users receive notices of security fixes and
@@ -73,6 +90,37 @@ governed by GitHub's own policies.
 
 If a newer release exists you are shown a dialog with a link; nothing is
 downloaded or installed unless you choose to do it yourself.
+
+### Surface Scan (only when you start it)
+
+Surface Scan is opt-in. When you choose **Internet → Surface Search…** and
+press **Search the web**, LucidGrasp sends the query image you selected to each
+reverse-image provider you have enabled:
+
+- **SauceNAO** and **trace.moe** receive a downscaled copy of the image.
+- **SerpApi** receives a downscaled copy, uploads it to its own image service,
+  and runs a Google Lens lookup.
+- **Zenserp** is only offered for a publicly reachable image URL. Local files
+  are reported as unsupported, so no local image is sent to Zenserp.
+
+The request also carries the provider API key you configured, an identifying
+`LucidGrasp/<version>` user agent, and the network metadata any HTTPS request
+carries, including your IP address. The provider processes the image and
+returns results under its own terms, quotas and privacy policy. LucidGrasp then
+downloads result thumbnails from the addresses the provider returned, so the
+servers hosting those thumbnails also see your request. The project does not
+receive the image, the key, or the results.
+
+The keyword-stage providers (**HasData**, **ScraperAPI**, **Scrape.do** and
+**ZenRows**) currently receive only the key-validation request for that
+provider. They are not used for an image search until the image-to-keyword
+stage is added.
+
+When you press **Validate** on the key page, the key is sent to that provider's
+validation endpoint. Keys are otherwise never transmitted. LucidGrasp keeps no
+copy of a surface-scan request or its results beyond the current session; keys
+remain on your machine until you remove them. Providers retain request logs and
+results under their own policies.
 
 ### Help menu links
 

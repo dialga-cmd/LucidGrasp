@@ -20,9 +20,10 @@ Policy...** and **Help → Legal Notices...**.
 
 The lucidgrasp software was never sold and is not sold at any cost. These
 documents govern the Software as published on GitHub and through the Linux,
-Windows, and macOS release channels. Third-party components (Qt6, OpenCV) and
-third-party services (GitHub, mail providers, and web browsers used via the
-Help menu) are governed by their own policies.
+Windows, and macOS release channels, including the curl installers and the
+packages produced by CI. Third-party components (Qt6, OpenCV) and third-party
+services (GitHub, mail providers, web browsers opened from the Help menu, and
+the Surface Scan providers you enable) are governed by their own policies.
 
 ## How to contact the maintainer
 

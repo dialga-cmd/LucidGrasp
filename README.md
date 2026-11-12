@@ -33,7 +33,7 @@ The Help menu gets you in touch with the project: 'Report an Issue' and 'Request
 
 Alongside local search, LucidGrasp includes a surface scan: given an image you select, it looks for where that image or a visually similar one appears across the open web. It is a bring-your-own-key feature. LucidGrasp ships no API key and never bundles a shared secret, so you connect an account you already control.
 
-Choose **Internet → Surface Scan — API Keys…** and the app opens a setup page in your default browser, served from a loopback address on your own machine. There you paste a key for each provider you want, press Validate to have the app check it against the provider directly, and press Sync to commit. Keys are stored in your OS keychain when one is available and otherwise in an owner-only settings file; the page only ever sees a masked value. The setup covers the platforms that are self-serve and grant recurring free credits, including SauceNAO and trace.moe for reverse lookup, and SerpApi and Zenserp for third-party reverse search.
+Choose **Internet → Surface Scan — API Keys…** and the app opens a setup page in your default browser, served from a loopback address on your own machine. There you paste a key for each provider you want, press Validate to have the app check it against the provider directly, and press Sync to commit. Keys are stored in your OS keychain when one is available and otherwise in an owner-only settings file; the page only ever sees a masked value. The setup covers the platforms that are self-serve and grant recurring free credits: SauceNAO and trace.moe for reverse lookup, SerpApi (Google Lens) and Zenserp for third-party reverse search, and HasData, ScraperAPI, Scrape.do and ZenRows for the image-to-keyword stage.
 
 To run it, choose **Internet → Surface Search…** (`Ctrl+Shift+S`): the left panel collapses to a query-image picker, and **Search the web** runs the image across every provider you have enabled. Results open the matching page in your browser. The reverse search calls are implemented and run off the GUI thread; the image-to-keyword bridge for the text-only vendors is the next step. Zenserp's reverse endpoint needs a publicly hosted image URL, so it reports that local files are unsupported instead of failing silently.
 
@@ -57,7 +57,7 @@ The long term goal for this project is global discovery. Local search is the fou
 
 ### Downloads
 
-Pre built binaries are available on the Releases page. Download the archive for your operating system, extract it, and run the application.
+Pre built binaries are available on the Releases page. Use the curl installer below, a package manager, or download an archive manually.
 
 ### Install with curl
 
@@ -98,6 +98,17 @@ Common installer options:
 | `--dry-run` | Linux, macOS | Show what would be done without changing anything |
 
 On Windows, `install.ps1` accepts the equivalent `-Version`, `-Destination`, `-NoDeps`, `-NoVerify`, `-Uninstall` and `-DryRun` switches.
+
+### Package managers
+
+LucidGrasp is also published through these channels:
+
+| Channel | Install |
+| --- | --- |
+| Snap Store | `sudo snap install lucidgrasp` |
+| Ubuntu PPA | `sudo add-apt-repository ppa:realdialga/lucidgrasp && sudo apt update && sudo apt install lucidgrasp` |
+| Scoop (Windows) | `scoop bucket add lucidgrasp https://github.com/dialga-cmd/lucidgrasp-bucket && scoop install lucidgrasp` |
+| OBS | Follow the repository instructions on the [OBS package page](https://build.opensuse.org/package/show/home:dialga-cmd/lucidgrasp) |
 
 ### Runtime dependencies
 
@@ -140,7 +151,7 @@ If your Linux distribution ships an incompatible OpenCV ABI (the release build i
 
 ### Manual download
 
-If you prefer not to run the installer, download the archive for your platform from the Releases page.
+If you prefer not to run the installer, download the archive for your platform from the Releases page. Every platform asset has a matching `.sha256` file you can use to verify it.
 
 For Linux, download `lucidgrasp-linux-x64.tar.gz`, install Qt6 and OpenCV, then extract and run it:
 
@@ -149,6 +160,13 @@ sudo apt install qt6-base-dev libopencv-dev
 tar -xzf lucidgrasp-linux-x64.tar.gz
 cd LucidGrasp
 ./LucidGrasp
+```
+
+For macOS, download `lucidgrasp-macos-<version>.dmg`, open it, and drag `LucidGrasp.app` to Applications. Apple Silicon also needs Rosetta 2 for the current x86_64 build:
+
+```bash
+softwareupdate --install-rosetta --agree-to-license
+open /Applications/LucidGrasp.app
 ```
 
 For Windows, download `LucidGrasp_Setup_x64.exe` and run it. Everything is bundled inside the installer. It installs to a standard location, adds a start menu entry and an optional desktop shortcut, and there is nothing else to download or install. To uninstall, use Add or Remove Programs in Windows Settings.
@@ -226,6 +244,23 @@ windeployqt --release LucidGrasp.exe
 
 Then copy the OpenCV world DLL from the `bin` directory under `C:\opencv\opencv\build\x64\` (for example `vc16\bin\opencv_world*.dll`) into the same folder. The application is now ready to run.
 
+### Building from Source (macOS)
+
+You will need the Xcode command line tools, CMake, Qt 6.8, and OpenCV 4.
+
+```bash
+xcode-select --install
+brew install cmake qt@6 opencv@4
+./make-icns.sh lucidgrasp.png lucidgrasp.icns
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_PREFIX_PATH="$(brew --prefix qt@6)" \
+  -DOpenCV_DIR="$(brew --prefix opencv@4)/lib/cmake/opencv4" \
+  -DLUCIDGRASP_ICNS="$PWD/lucidgrasp.icns"
+cmake --build build -j"$(sysctl -n hw.ncpu)"
+```
+
+The result is `build/LucidGrasp.app`; open it with `open build/LucidGrasp.app`. Run `QT_QPA_PLATFORM=offscreen ./build/LucidGrasp.app/Contents/MacOS/LucidGrasp --selftest` to verify the build without opening a window.
+
 ### System Installation (Linux Only)
 
 To install the application globally so it appears in your application drawer with its icon, run the following from within the `build` directory:
@@ -240,6 +275,8 @@ To uninstall the application, run this command from the `build` directory:
 ```bash
 sudo xargs rm < install_manifest.txt
 ```
+
+The curl installer does the same job without a build: `sh install.sh --system` installs under `/usr/local`, and `sh install.sh --system --uninstall` removes exactly the files it recorded.
 
 ### Documentation
 
