@@ -59,7 +59,90 @@ The long term goal for this project is global discovery. Local search is the fou
 
 Pre built binaries are available on the Releases page. Download the archive for your operating system, extract it, and run the application.
 
-For Linux, download `lucidgrasp-linux-x64.tar.gz`. You will still need Qt6 and OpenCV installed on your system because Linux builds link against system libraries.
+### Install with curl
+
+LucidGrasp ships a small installer script for each platform. It resolves the latest release, verifies the download's SHA-256 checksum, installs any missing runtime dependencies, and puts the application in the right place. Nothing in the installer changes the LucidGrasp source or the application itself.
+
+**Linux and macOS**
+
+```bash
+curl -fsSL https://github.com/dialga-cmd/LucidGrasp/releases/latest/download/install.sh | sh
+```
+
+**Windows** (PowerShell)
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://github.com/dialga-cmd/LucidGrasp/releases/latest/download/install.ps1 | iex"
+```
+
+If you would rather inspect the script before running it:
+
+```bash
+curl -fsSL https://github.com/dialga-cmd/LucidGrasp/releases/latest/download/install.sh -o install.sh
+less install.sh
+sh install.sh
+```
+
+Common installer options:
+
+| Option | Applies to | Description |
+| --- | --- | --- |
+| `--version VERSION` | Linux, macOS | Install a specific release instead of the latest |
+| `--prefix DIR` | Linux | Install to `DIR` instead of `~/.local` |
+| `--system` | Linux, macOS | Install system-wide (`/usr/local`, or `/Applications` on macOS) |
+| `--appimage` | Linux | Install the AppImage instead of the tarball |
+| `--no-deps` | Linux, macOS | Do not install missing dependencies |
+| `--no-verify` | Linux, macOS | Skip SHA-256 verification |
+| `--keep-quarantine` | macOS | Leave the Gatekeeper quarantine flag in place |
+| `--uninstall` | Linux, macOS | Remove a previous installation |
+| `--dry-run` | Linux, macOS | Show what would be done without changing anything |
+
+On Windows, `install.ps1` accepts the equivalent `-Version`, `-Destination`, `-NoDeps`, `-NoVerify`, `-Uninstall` and `-DryRun` switches.
+
+### Runtime dependencies
+
+The release artifacts do not all contain the same things:
+
+| Platform | Included in the download | Still needed on the system |
+| --- | --- | --- |
+| Linux | The LucidGrasp binary, desktop entry, and icon | Qt6 Core/Gui/Widgets/Network/DBus and OpenCV core/imgproc/imgcodecs/features2d. The installer adds them with your package manager unless you pass `--no-deps`. |
+| macOS | Qt6 frameworks and OpenCV dylibs bundled inside `LucidGrasp.app` | Rosetta 2 on Apple Silicon (the current build is x86_64). The installer adds it automatically. |
+| Windows | Qt6, OpenCV, and the application bundled inside the Inno Setup installer | Microsoft Visual C++ 2015–2022 Redistributable (x64). The installer checks for it and installs it if missing. |
+
+To install the Linux dependencies yourself, use the command for your distribution:
+
+```bash
+# Debian / Ubuntu
+sudo apt install qt6-base-dev libopencv-dev
+
+# Fedora / Nobara
+sudo dnf install qt6-qtbase opencv
+
+# openSUSE
+sudo zypper install libQt6Widgets6 libQt6Network6 libQt6DBus6 opencv
+
+# Arch
+sudo pacman -S qt6-base opencv
+
+# Alpine
+sudo apk add qt6-qtbase opencv
+```
+
+On Apple Silicon, install Rosetta 2 yourself with:
+
+```bash
+softwareupdate --install-rosetta --agree-to-license
+```
+
+On Windows, install the Microsoft Visual C++ Redistributable for Visual Studio 2015–2022 (x64) from <https://aka.ms/vs/17/release/vc_redist.x64.exe>.
+
+If your Linux distribution ships an incompatible OpenCV ABI (the release build is linked against Ubuntu 24.04's OpenCV 4.6), use the Snap, OBS, or Launchpad PPA package instead of the tarball/AppImage, or build from source.
+
+### Manual download
+
+If you prefer not to run the installer, download the archive for your platform from the Releases page.
+
+For Linux, download `lucidgrasp-linux-x64.tar.gz`, install Qt6 and OpenCV, then extract and run it:
 
 ```bash
 sudo apt install qt6-base-dev libopencv-dev

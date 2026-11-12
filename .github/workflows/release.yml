@@ -10,6 +10,35 @@ permissions:
   contents: write
 
 jobs:
+  validate-installers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+
+    - name: Check shell installer
+      run: |
+        sh -n packaging/install.sh
+        if command -v shellcheck >/dev/null 2>&1; then
+          shellcheck --severity=error packaging/install.sh
+        fi
+
+    - name: Check PowerShell installer
+      shell: pwsh
+      run: |
+        $errors = $null
+        [System.Management.Automation.Language.Parser]::ParseFile(
+          (Join-Path $PWD "packaging/install.ps1"), [ref]$null, [ref]$errors
+        ) | Out-Null
+        if ($errors.Count -gt 0) {
+          $errors | ForEach-Object {
+            Write-Error ("{0}:{1}: {2}" -f $_.Extent.StartLineNumber, $_.Extent.StartColumnNumber, $_.Message)
+          }
+          exit 1
+        }
+
   build-linux:
     # Build on the oldest supported LTS so the tarball and AppImage keep
     # working on 24.04; ubuntu-latest now resolves to 26.04.
@@ -43,8 +72,10 @@ jobs:
         cp build/LucidGrasp package/LucidGrasp/
         cp lucidgrasp.png package/LucidGrasp/
         cp io.github.dialga_cmd.LucidGrasp.desktop package/LucidGrasp/
+        cp io.github.dialga_cmd.LucidGrasp.metainfo.xml package/LucidGrasp/
         cp README.md package/LucidGrasp/
         cp LICENSE package/LucidGrasp/
+        cp CHANGELOG.md package/LucidGrasp/
         cd package
         tar -czvf lucidgrasp-linux-x64.tar.gz LucidGrasp/
 
@@ -65,13 +96,22 @@ jobs:
         chmod +x AppDir/AppRun
         APPIMAGE_EXTRACT_AND_RUN=1 ./appimagetool AppDir LucidGrasp-x86_64.AppImage
 
+    - name: Generate checksums
+      run: |
+        cd package
+        sha256sum lucidgrasp-linux-x64.tar.gz > lucidgrasp-linux-x64.tar.gz.sha256
+        cd ..
+        sha256sum LucidGrasp-x86_64.AppImage > LucidGrasp-x86_64.AppImage.sha256
+
     - name: Upload Release Assets
       if: github.event_name == 'release'
       uses: softprops/action-gh-release@v3
       with:
         files: |
           package/lucidgrasp-linux-x64.tar.gz
+          package/lucidgrasp-linux-x64.tar.gz.sha256
           LucidGrasp-x86_64.AppImage
+          LucidGrasp-x86_64.AppImage.sha256
 
   build-windows:
     runs-on: windows-latest
@@ -175,12 +215,35 @@ jobs:
         if ($parsed.hash -ne $hash) { throw "Manifest hash mismatch" }
         Write-Output "Scoop manifest OK for v${version}: $hash"
 
+    - name: Generate checksum
+      shell: pwsh
+      run: |
+        $hash = (Get-FileHash package\LucidGrasp_Setup_x64.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+        "$hash  LucidGrasp_Setup_x64.exe" | Set-Content package\LucidGrasp_Setup_x64.exe.sha256 -NoNewline
+
     - name: Upload Release Asset
       if: github.event_name == 'release'
       uses: softprops/action-gh-release@v3
       with:
         files: |
           package/LucidGrasp_Setup_x64.exe
+          package/LucidGrasp_Setup_x64.exe.sha256
+
+  upload-installers:
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+
+    - name: Upload installer scripts
+      uses: softprops/action-gh-release@v3
+      with:
+        files: |
+          packaging/install.sh
+          packaging/install.ps1
 
   update-scoop:
     if: github.event_name == 'release'

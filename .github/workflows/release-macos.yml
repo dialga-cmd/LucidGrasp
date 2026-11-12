@@ -180,8 +180,18 @@ jobs:
 
         ls -lh "$DMG"
 
+    - name: Generate checksum
+      if: github.event_name == 'release'
+      run: |
+        VERSION=$(grep '^CMAKE_PROJECT_VERSION:STATIC=' build/CMakeCache.txt \
+          | cut -d= -f2)
+        DMG="lucidgrasp-macos-${VERSION}.dmg"
+        shasum -a 256 "$DMG" > "$DMG.sha256"
+
     - name: Upload Release Asset
       if: github.event_name == 'release'
       uses: softprops/action-gh-release@v3
       with:
-        files: lucidgrasp-macos-*.dmg
+        files: |
+          lucidgrasp-macos-*.dmg
+          lucidgrasp-macos-*.dmg.sha256
